@@ -1,0 +1,19 @@
+- name: Deploy nginx site
+  template:
+    src: site.conf.j2
+    dest: "/etc/nginx/sites-available/{{ project_name }}.conf"
+
+- name: Enable nginx site
+  file:
+    src: "/etc/nginx/sites-available/{{ project_name }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ project_name }}.conf"
+    state: link
+    force: true
+
+- name: Test nginx config
+  command: nginx -t
+
+- name: Reload nginx
+  service:
+    name: nginx
+    state: reloaded

@@ -1,0 +1,31 @@
+- name: Ensure PostgreSQL is installed
+  apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+    state: present
+    update_cache: true
+
+- name: Ensure database user exists
+  become_user: postgres
+  postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_pass }}"
+    state: present
+
+- name: Ensure database exists
+  become_user: postgres
+  postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    state: present
+
+- name: Grant privileges on public schema
+  become_user: postgres
+  postgresql_privs:
+    db: "{{ db_name }}"
+    roles: "{{ db_user }}"
+    type: schema
+    objs: public
+    privs: "CREATE,USAGE"
+    state: present

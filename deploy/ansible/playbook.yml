@@ -1,0 +1,11 @@
+- hosts: prod
+  become: true
+  vars_files:
+    - group_vars/prod.yml
+  roles:
+    - common
+    - postgres
+    - backend
+    - frontend
+    - ssl_arvan
+    - nginx

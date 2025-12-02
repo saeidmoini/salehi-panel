@@ -1,0 +1,14 @@
+- name: Install base packages
+  apt:
+    name:
+      - git
+      - python3-venv
+      - python3-pip
+      - nginx
+      - build-essential
+      - curl
+      - ca-certificates
+      - nodejs
+      - npm
+    state: present
+    update_cache: true

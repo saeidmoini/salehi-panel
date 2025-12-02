@@ -1,0 +1,36 @@
+- name: Ensure ssl directory exists
+  file:
+    path: "{{ ssl_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Install acme.sh if missing
+  when: domain is defined and domain != "" and arvan_token is defined and arvan_token != ""
+  shell: |
+    curl https://get.acme.sh | sh -s email=dev@localhost
+  args:
+    creates: "{{ acme_sh_path }}"
+
+- name: Issue Arvan wildcard cert (if domain is set)
+  when: domain is defined and domain != "" and arvan_token is defined and arvan_token != ""
+  environment:
+    Arvan_Token: "{{ arvan_token }}"
+  command: >
+    {{ acme_sh_path }} --issue --dns dns_arvan
+    -d {{ domain }} -d *.{{ domain }} --keylength ec-256 --ecc
+  args:
+    creates: "/root/.acme.sh/{{ domain }}_ecc/{{ domain }}.cer"
+
+- name: Install Arvan cert (if issued)
+  when: domain is defined and domain != "" and arvan_token is defined and arvan_token != ""
+  environment:
+    Arvan_Token: "{{ arvan_token }}"
+  command: >
+    {{ acme_sh_path }} --install-cert -d {{ domain }} --ecc
+    --key-file {{ ssl_dir }}/privkey.key
+    --fullchain-file {{ ssl_dir }}/fullchain.crt
+    --cert-file {{ ssl_dir }}/cert.crt
+    --ca-file {{ ssl_dir }}/ca.crt
+    --reloadcmd "systemctl reload nginx"
+  args:
+    creates: "{{ ssl_dir }}/fullchain.crt"
