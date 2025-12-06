@@ -32,6 +32,12 @@
     virtualenv: "{{ venv_path }}"
     virtualenv_site_packages: false
 
+- name: Ensure gunicorn is present
+  pip:
+    name: gunicorn==21.2.0
+    virtualenv: "{{ venv_path }}"
+  register: gunicorn_installed
+
 - name: Render backend .env
   template:
     src: backend_env.j2
