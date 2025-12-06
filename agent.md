@@ -47,6 +47,7 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 - Keep dialer token secret; do not expose dialer routes without auth.
 - Templates for ops are under `deploy/` (systemd, nginx, and Ansible skeleton). Adjust paths/env/certs per environment.
 - Alembic scaffold is under `backend/alembic/`. Use `alembic revision --autogenerate` + `alembic upgrade head` when models change; ensure `DATABASE_URL` is set in `.env`.
+- Ansible tags: `init` (one-time: DB/user creation, systemd unit, SSL/ACME, optional admin seed), `deploy` (git pull, pip with gunicorn, Alembic upgrade, systemd restart, nginx config/reload and removes default site), `frontend` (npm install/build), `ssl` (ACME/Arvan). For updates run `--tags deploy,frontend --skip-tags init,ssl`; first install run `--tags init,deploy,frontend,ssl`. Keep `initial_admin_user/password` empty after first seed to avoid repeats.
 
 ## Always
 - Update README.md when behavior/config changes.

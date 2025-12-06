@@ -114,6 +114,12 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - When models change, generate a new revision: `../venv/bin/alembic revision --autogenerate -m "desc"` then `../venv/bin/alembic upgrade head`.
 
 ## Ansible (repeatable deploy)
-- A ready-to-use Ansible skeleton is under `deploy/ansible/` (inventory, playbook, roles for common packages, postgres, backend, frontend, nginx).
+- A ready-to-use Ansible skeleton is under `deploy/ansible/` (inventory, playbook, roles for common packages, postgres, backend, frontend, nginx, ssl).
 - Copy `deploy/ansible/group_vars/prod.sample.yml` to `deploy/ansible/group_vars/prod.yml` (ignored by git) and fill in your server IP, repo URL, DB creds, domains, ports, and tokens (or use Ansible Vault).
-- Run: `cd deploy/ansible && ansible-playbook -i inventory.ini playbook.yml`.
+- Tags:
+  - `init`: one-time tasks (DB/user creation, systemd unit, SSL/ACME, optional initial admin seed)
+  - `deploy`: git pull, pip (gunicorn ensured), Alembic upgrade, systemd restart, nginx config/reload (removes default site)
+  - `frontend`: npm install/build, frontend .env render
+  - `ssl`: ACME/Arvan issuance/renewal
+- First install: `cd deploy/ansible && ansible-playbook -i inventory.ini playbook.yml --tags init,deploy,frontend,ssl`
+- Routine updates: `cd deploy/ansible && ansible-playbook -i inventory.ini playbook.yml --tags deploy,frontend --skip-tags init,ssl`
