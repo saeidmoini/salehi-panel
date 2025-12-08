@@ -64,6 +64,13 @@ const NumbersPage = () => {
     fetchNumbers()
   }
 
+  const deleteNumber = async (id: number) => {
+    const ok = window.confirm('این شماره حذف شود؟')
+    if (!ok) return
+    await client.delete(`/api/numbers/${id}`)
+    setNumbers((prev) => prev.filter((n) => n.id !== id))
+  }
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
@@ -136,17 +143,26 @@ const NumbersPage = () => {
                       {n.last_attempt_at ? dayjs(n.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
                     </td>
                     <td className="text-right">
-                      <select
-                        className="rounded border border-slate-200 px-2 py-1 text-xs"
-                        value={n.status}
-                        onChange={(e) => updateStatus(n.id, e.target.value)}
-                      >
-                        {Object.keys(statusLabels).map((key) => (
-                          <option key={key} value={key}>
-                            {statusLabels[key]}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex items-center justify-end gap-2">
+                        <select
+                          className="rounded border border-slate-200 px-2 py-1 text-xs"
+                          value={n.status}
+                          onChange={(e) => updateStatus(n.id, e.target.value)}
+                        >
+                          {Object.keys(statusLabels).map((key) => (
+                            <option key={key} value={key}>
+                              {statusLabels[key]}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="text-xs text-red-600"
+                          onClick={() => deleteNumber(n.id)}
+                          title="حذف شماره"
+                        >
+                          حذف
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

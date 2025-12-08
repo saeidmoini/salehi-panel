@@ -54,3 +54,9 @@ def upload_numbers(file: UploadFile = File(...), db: Session = Depends(get_db)):
 def update_status(number_id: int, payload: PhoneNumberStatusUpdate, db: Session = Depends(get_db)):
     number = phone_service.update_number_status(db, number_id, payload)
     return number
+
+
+@router.delete("/{number_id}")
+def delete_number(number_id: int, db: Session = Depends(get_db)):
+    phone_service.delete_number(db, number_id)
+    return {"deleted": True, "id": number_id}

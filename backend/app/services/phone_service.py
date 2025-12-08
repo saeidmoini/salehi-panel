@@ -79,3 +79,11 @@ def bulk_reset(db: Session, ids: Iterable[int], status: CallStatus = CallStatus.
         num.assigned_batch_id = None
     db.commit()
     return len(numbers)
+
+
+def delete_number(db: Session, number_id: int) -> None:
+    number = db.get(PhoneNumber, number_id)
+    if not number:
+        raise HTTPException(status_code=404, detail="Number not found")
+    db.delete(number)
+    db.commit()
