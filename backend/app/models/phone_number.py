@@ -12,6 +12,7 @@ class CallStatus(str, Enum):
     CONNECTED = "CONNECTED"
     FAILED = "FAILED"
     NOT_INTERESTED = "NOT_INTERESTED"
+    HANGUP = "HANGUP"
 
 
 class PhoneNumber(Base):
