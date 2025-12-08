@@ -18,6 +18,7 @@ const statusLabels: Record<string, string> = {
   FAILED: 'خطا دریافت شد',
   NOT_INTERESTED: 'عدم نیاز کاربر',
   HANGUP: 'قطع تماس توسط کاربر',
+  DISCONNECTED: 'ناموفق',
 }
 
 const statusColors: Record<string, string> = {
@@ -27,6 +28,7 @@ const statusColors: Record<string, string> = {
   FAILED: 'bg-red-100 text-red-800',
   NOT_INTERESTED: 'bg-slate-200 text-slate-800',
   HANGUP: 'bg-purple-100 text-purple-800',
+  DISCONNECTED: 'bg-gray-200 text-gray-800',
 }
 
 const NumbersPage = () => {

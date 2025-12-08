@@ -23,6 +23,13 @@ try:
                         ) THEN
                             ALTER TYPE callstatus ADD VALUE 'HANGUP';
                         END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_enum e
+                            JOIN pg_type t ON t.oid = e.enumtypid
+                            WHERE t.typname = 'callstatus' AND e.enumlabel = 'DISCONNECTED'
+                        ) THEN
+                            ALTER TYPE callstatus ADD VALUE 'DISCONNECTED';
+                        END IF;
                     END IF;
                 END$$;
                 """
