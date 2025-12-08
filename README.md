@@ -84,6 +84,7 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - `skip_holidays` flag is stored; holiday detection hook is stubbed for now. Default is taken from `.env` on first boot.
 - Global enable/disable switch: when disabled, `/api/dialer/next-batch` returns `call_allowed=false` with reason `disabled` so no numbers reach the dialer.
 - `schedule_version` increments on changes and is echoed in `/api/dialer/next-batch` responses.
+- Assigned numbers auto-unlock after `ASSIGNMENT_TIMEOUT_MINUTES` (default 60) if no result is reported, returning them to the queue.
 
 ## CORS
 - Backend CORS allowlist is controlled via `CORS_ORIGINS` in `.env` (JSON array). Default allows localhost ports 5173/80 for the Vite dev server. Add your deployed frontend domain when hosting.

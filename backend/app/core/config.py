@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     default_batch_size: int = Field(100, alias="DEFAULT_BATCH_SIZE")
     timezone: str = Field("Asia/Tehran", alias="TIMEZONE")
     skip_holidays_default: bool = Field(True, alias="SKIP_HOLIDAYS")
+    assignment_timeout_minutes: int = Field(60, alias="ASSIGNMENT_TIMEOUT_MINUTES")
     short_retry_seconds: int = 120
     long_retry_seconds: int = 900
     cors_origins: list[str] = Field(

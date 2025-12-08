@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -33,6 +33,8 @@ def fetch_next_batch(db: Session, size: int | None = None):
     requested_size = min(requested_size, settings.max_batch_size)
     if requested_size <= 0:
         requested_size = settings.default_batch_size
+
+    unlock_stale_assignments(db)
 
     stmt = (
         select(PhoneNumber)
@@ -97,3 +99,22 @@ def report_result(db: Session, report: DialerReport):
     db.commit()
     db.refresh(number)
     return number
+
+
+def unlock_stale_assignments(db: Session) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.assignment_timeout_minutes)
+    stale = (
+        db.query(PhoneNumber)
+        .filter(
+            PhoneNumber.status == CallStatus.IN_QUEUE,
+            PhoneNumber.assigned_at.is_not(None),
+            PhoneNumber.assigned_at <= cutoff,
+        )
+        .all()
+    )
+    for num in stale:
+        num.assigned_at = None
+        num.assigned_batch_id = None
+    if stale:
+        db.commit()
+    return len(stale)
