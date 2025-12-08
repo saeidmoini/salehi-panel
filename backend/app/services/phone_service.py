@@ -89,3 +89,18 @@ def delete_number(db: Session, number_id: int) -> None:
     db.query(CallAttempt).filter(CallAttempt.phone_number_id == number_id).delete(synchronize_session=False)
     db.delete(number)
     db.commit()
+
+
+def reset_number(db: Session, number_id: int) -> PhoneNumber:
+    number = db.get(PhoneNumber, number_id)
+    if not number:
+        raise HTTPException(status_code=404, detail="Number not found")
+    number.status = CallStatus.IN_QUEUE
+    number.assigned_at = None
+    number.assigned_batch_id = None
+    number.total_attempts = 0
+    number.last_attempt_at = None
+    number.last_status_change_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(number)
+    return number

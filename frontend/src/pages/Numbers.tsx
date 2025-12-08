@@ -75,6 +75,11 @@ const NumbersPage = () => {
     setNumbers((prev) => prev.filter((n) => n.id !== id))
   }
 
+  const resetNumber = async (id: number) => {
+    await client.post(`/api/numbers/${id}/reset`)
+    fetchNumbers()
+  }
+
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
@@ -159,6 +164,13 @@ const NumbersPage = () => {
                             </option>
                           ))}
                         </select>
+                        <button
+                          className="text-xs text-amber-700"
+                          onClick={() => resetNumber(n.id)}
+                          title="بازگشت به صف"
+                        >
+                          ریست
+                        </button>
                         <button
                           className="text-xs text-red-600"
                           onClick={() => deleteNumber(n.id)}

@@ -60,3 +60,9 @@ def update_status(number_id: int, payload: PhoneNumberStatusUpdate, db: Session 
 def delete_number(number_id: int, db: Session = Depends(get_db)):
     phone_service.delete_number(db, number_id)
     return {"deleted": True, "id": number_id}
+
+
+@router.post("/{number_id}/reset", response_model=PhoneNumberOut)
+def reset_number(number_id: int, db: Session = Depends(get_db)):
+    number = phone_service.reset_number(db, number_id)
+    return number
