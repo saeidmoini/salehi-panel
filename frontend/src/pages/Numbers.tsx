@@ -39,6 +39,9 @@ const NumbersPage = () => {
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+  const pageSize = 50
+  const [hasMore, setHasMore] = useState(false)
 
   const fetchNumbers = async () => {
     setLoading(true)
@@ -46,15 +49,18 @@ const NumbersPage = () => {
       params: {
         status: statusFilter || undefined,
         search: search || undefined,
+        skip: page * pageSize,
+        limit: pageSize,
       },
     })
     setNumbers(data)
+    setHasMore(data.length === pageSize)
     setLoading(false)
   }
 
   useEffect(() => {
     fetchNumbers()
-  }, [])
+  }, [page, statusFilter, search])
 
   const handleAdd = async (e: FormEvent) => {
     e.preventDefault()
@@ -107,7 +113,18 @@ const NumbersPage = () => {
     <div className="space-y-6 px-2 md:px-0 max-w-full w-full min-w-0">
       <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm w-full min-w-0">
         <h2 className="font-semibold mb-3">افزودن شماره جدید</h2>
-        <div className="flex flex-col md:flex-row gap-6">
+        <div className="flex flex-col gap-6">
+          <div className="flex-1 space-y-2 w-full">
+            <label className="block text-sm font-medium text-slate-700">افزودن از فایل (یک ستون شماره)</label>
+            <input
+              type="file"
+              accept=".csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              onChange={handleUpload}
+              className="block w-full text-sm text-slate-700 file:mr-4 file:rounded file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-white hover:file:bg-brand-700"
+              disabled={uploading}
+            />
+            {uploadMessage && <div className="text-xs text-slate-600">{uploadMessage}</div>}
+          </div>
           <form className="flex-1 space-y-3 w-full" onSubmit={handleAdd}>
             <textarea
               className="w-full rounded border border-slate-200 px-3 py-2 text-sm"
@@ -120,17 +137,6 @@ const NumbersPage = () => {
               افزودن به صف
             </button>
           </form>
-          <div className="flex-1 space-y-2 w-full">
-            <label className="block text-sm font-medium text-slate-700">افزودن از فایل (یک ستون شماره)</label>
-            <input
-              type="file"
-              accept=".csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-              onChange={handleUpload}
-              className="block w-full text-sm text-slate-700 file:mr-4 file:rounded file:border-0 file:bg-brand-500 file:px-4 file:py-2 file:text-white hover:file:bg-brand-700"
-              disabled={uploading}
-            />
-            {uploadMessage && <div className="text-xs text-slate-600">{uploadMessage}</div>}
-          </div>
         </div>
       </div>
 
@@ -139,7 +145,10 @@ const NumbersPage = () => {
           <select
             className="rounded border border-slate-200 px-2 py-1 text-sm"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setPage(0)
+              setStatusFilter(e.target.value)
+            }}
           >
             <option value="">همه وضعیت‌ها</option>
             {Object.entries(statusLabels).map(([key, label]) => (
@@ -150,12 +159,34 @@ const NumbersPage = () => {
           </select>
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setPage(0)
+              setSearch(e.target.value)
+            }}
             placeholder="جستجوی شماره"
             className="rounded border border-slate-200 px-2 py-1 text-sm"
           />
           <button onClick={fetchNumbers} className="rounded bg-slate-900 text-white px-3 py-1 text-sm">
             بروزرسانی
+          </button>
+        </div>
+        <div className="flex items-center justify-end gap-2 mb-2">
+          <span className="text-xs text-slate-600">
+            صفحه {page + 1}
+          </span>
+          <button
+            className="text-xs rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
+            onClick={() => setPage((p) => Math.max(p - 1, 0))}
+            disabled={page === 0}
+          >
+            قبلی
+          </button>
+          <button
+            className="text-xs rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
+            onClick={() => setPage((p) => p + 1)}
+            disabled={!hasMore}
+          >
+            بعدی
           </button>
         </div>
         {loading ? (
@@ -168,8 +199,8 @@ const NumbersPage = () => {
                   <th className="py-2 text-right">شماره</th>
                   <th className="text-right">وضعیت</th>
                   <th className="text-right">تعداد تلاش</th>
-                  <th className="text-right">آخرین تلاش</th>
-                  <th className="text-right">اقدامات</th>
+                  <th className="text-right w-32">آخرین تلاش</th>
+                  <th className="text-right w-80">اقدامات</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,10 +218,10 @@ const NumbersPage = () => {
                     <td className="text-right">
                       {n.last_attempt_at ? dayjs(n.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
                     </td>
-                    <td className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="text-right w-80">
+                      <div className="flex items-center justify-start gap-4">
                         <select
-                          className="rounded border border-slate-200 px-2 py-1 text-xs"
+                          className="rounded border border-slate-200 px-2 py-1 text-xs w-40"
                           value={n.status}
                           onChange={(e) => updateStatus(n.id, e.target.value)}
                         >
@@ -201,7 +232,7 @@ const NumbersPage = () => {
                           ))}
                         </select>
                         <button
-                          className="text-xs text-amber-700"
+                          className="text-xs text-amber-700 ml-2"
                           onClick={() => resetNumber(n.id)}
                           title="بازگشت به صف"
                         >
