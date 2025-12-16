@@ -50,7 +50,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         </nav>
       </aside>
       {menuOpen && <div className="fixed inset-0 bg-black/40 z-20 md:hidden" onClick={() => setMenuOpen(false)}></div>}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <header className="flex items-center justify-between bg-white border-b border-slate-200 px-4 py-3">
           <div className="flex items-center gap-3">
             <button

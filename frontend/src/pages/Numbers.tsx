@@ -104,8 +104,8 @@ const NumbersPage = () => {
   }
 
   return (
-    <div className="space-y-6 px-2 md:px-0 max-w-full">
-      <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm w-full overflow-x-hidden">
+    <div className="space-y-6 px-2 md:px-0 max-w-full w-full min-w-0">
+      <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm w-full min-w-0">
         <h2 className="font-semibold mb-3">افزودن شماره جدید</h2>
         <div className="flex flex-col md:flex-row gap-6">
           <form className="flex-1 space-y-3 w-full" onSubmit={handleAdd}>
@@ -134,7 +134,7 @@ const NumbersPage = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm w-full overflow-x-hidden">
+      <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm w-full min-w-0">
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <select
             className="rounded border border-slate-200 px-2 py-1 text-sm"
