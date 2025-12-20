@@ -58,7 +58,8 @@ const DashboardPage = () => {
   const [saving, setSaving] = useState(false)
   const [numbersSummary, setNumbersSummary] = useState<NumbersSummary | null>(null)
   const [trend, setTrend] = useState<AttemptTrendResponse | null>(null)
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(Object.keys(statusLabels))
+  const filteredStatuses = useMemo(() => Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), [])
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(filteredStatuses)
 
   const fetchConfig = async () => {
     setLoadingConfig(true)
@@ -98,9 +99,31 @@ const DashboardPage = () => {
     </span>
   )
 
-  const pieData = useMemo(() => {
+  const attemptedCount = useMemo(() => {
     if (!numbersSummary) return null
-    const sorted = [...numbersSummary.status_counts].sort((a, b) => (a.status > b.status ? 1 : -1))
+    const inQueue = numbersSummary.status_counts.find((s) => s.status === 'IN_QUEUE')?.count ?? 0
+    const value = numbersSummary.total_numbers - inQueue
+    return value < 0 ? 0 : value
+  }, [numbersSummary])
+
+  const inQueueCount = useMemo(() => {
+    if (!numbersSummary) return null
+    return numbersSummary.status_counts.find((s) => s.status === 'IN_QUEUE')?.count ?? 0
+  }, [numbersSummary])
+
+  const attemptedStatusCounts = useMemo(() => {
+    if (!numbersSummary) return null
+    const attemptTotal = attemptedCount ?? 0
+    const filtered = numbersSummary.status_counts.filter((s) => s.status !== 'IN_QUEUE')
+    return filtered.map((s) => ({
+      ...s,
+      percentage: attemptTotal > 0 ? (s.count / attemptTotal) * 100 : 0,
+    }))
+  }, [numbersSummary, attemptedCount])
+
+  const pieData = useMemo(() => {
+    if (!attemptedStatusCounts) return null
+    const sorted = [...attemptedStatusCounts].sort((a, b) => (a.status > b.status ? 1 : -1))
     return {
       labels: sorted.map((s) => statusLabels[s.status] || s.status),
       datasets: [
@@ -111,7 +134,7 @@ const DashboardPage = () => {
         },
       ],
     }
-  }, [numbersSummary])
+  }, [attemptedStatusCounts])
 
   const lineData = useMemo(() => {
     if (!trend) return null
@@ -133,13 +156,6 @@ const DashboardPage = () => {
     })
     return { labels, datasets }
   }, [trend, selectedStatuses])
-
-  const attemptedCount = useMemo(() => {
-    if (!numbersSummary) return null
-    const inQueue = numbersSummary.status_counts.find((s) => s.status === 'IN_QUEUE')?.count ?? 0
-    const value = numbersSummary.total_numbers - inQueue
-    return value < 0 ? 0 : value
-  }, [numbersSummary])
 
   const toggleStatusFilter = (status: string) => {
     setSelectedStatuses((prev) =>
@@ -172,21 +188,18 @@ const DashboardPage = () => {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="font-semibold">نمای کلی شماره‌ها</h3>
-              <p className="text-sm text-slate-500">تعداد کل و توزیع وضعیت‌ها</p>
+              <p className="text-sm text-slate-500">تعداد کل و توزیع وضعیت‌ها (بر اساس تماس‌های گرفته‌شده)</p>
             </div>
-            <div className="text-right space-y-1">
-              <div className="text-sm font-semibold text-slate-700">
-                مجموع: {numbersSummary?.total_numbers ?? '-'}
-              </div>
-              <div className="text-xs text-slate-600">
-                کل تماس‌های انجام‌شده: {attemptedCount ?? '-'}
-              </div>
+            <div className="flex flex-col items-end text-sm text-slate-700 space-y-1">
+              <div>مجموع: <span className="font-semibold">{numbersSummary?.total_numbers ?? '-'}</span></div>
+              <div>تماس‌های انجام‌شده: <span className="font-semibold">{attemptedCount ?? '-'}</span></div>
+              <div>در صف: <span className="font-semibold">{inQueueCount ?? '-'}</span></div>
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              {numbersSummary ? (
-                numbersSummary.status_counts.map((s) => (
+              {attemptedStatusCounts ? (
+                attemptedStatusCounts.map((s) => (
                   <div key={s.status} className="flex items-center justify-between border border-slate-100 rounded-lg px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: statusColors[s.status] || '#cbd5e1' }}></span>
@@ -214,7 +227,7 @@ const DashboardPage = () => {
                           label: (ctx) => {
                             const label = ctx.label || ''
                             const value = ctx.parsed
-                            const count = numbersSummary?.status_counts[ctx.dataIndex]?.count ?? 0
+                            const count = attemptedStatusCounts?.[ctx.dataIndex]?.count ?? 0
                             return `${label}: ${value}% (${count})`
                           },
                         },
@@ -231,13 +244,13 @@ const DashboardPage = () => {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-semibold">روند درصد وضعیت تماس‌ها (روزانه)</h3>
-            <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت در تماس‌های هر روز (تقویم شمسی)</p>
-          </div>
-          <div className="flex flex-wrap gap-2 text-sm">
-            {Object.entries(statusLabels).map(([key, label]) => (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold">روند درصد وضعیت تماس‌ها (روزانه)</h3>
+              <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت در تماس‌های هر روز (تقویم شمسی، بدون در صف)</p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-sm">
+            {Object.entries(statusLabels).filter(([key]) => key !== 'IN_QUEUE').map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 border border-slate-200 rounded-full px-3 py-1">
                 <input
                   type="checkbox"
