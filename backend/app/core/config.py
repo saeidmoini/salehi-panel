@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Salehi Dialer Panel"
     database_url: str = Field(..., alias="DATABASE_URL")
     secret_key: str = Field(..., alias="SECRET_KEY")
-    access_token_expire_minutes: int = Field(60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    access_token_expire_minutes: int = Field(1440, alias="ACCESS_TOKEN_EXPIRE_MINUTES")  # default: 1 day
     algorithm: str = "HS256"
     dialer_token: str = Field(..., alias="DIALER_TOKEN")
     max_batch_size: int = Field(500, alias="MAX_BATCH_SIZE")

@@ -42,6 +42,7 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - Numbers management: add manually or CSV/XLSX import, dedupe, validation for Iranian mobile numbers, status updates, pagination/search
 - Bulk actions on numbers (select page, select all filtered across pages): change to any status, reset to queue, or delete
 - Dialer APIs protected by `DIALER_TOKEN`
+- Stats APIs for totals and reporting: number status distribution and daily call-attempt percentages
 - Single global switch (`enabled`/`call_allowed`) controls whether numbers are dispatched to the dialer; can be toggled from the UI or by the dialer via result reporting
 
 ## Dialer API (scheduling enforced)
@@ -72,9 +73,10 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
       }
     }
   ```
+  - Reasons may be `disabled`, `holiday`, `no_window`, or `outside_allowed_time_window`; retry hints use `short_retry_seconds` (120s) or `long_retry_seconds` (900s) depending on schedule.
   - Dialer must obey `call_allowed` and back off using `retry_after_seconds`.
 - `POST /api/dialer/report-result`
-  - Payload: `{ "number_id": 1, "phone_number": "0912...", "status": "CONNECTED" | "FAILED" | "NOT_INTERESTED" | "MISSED", "reason": "optional", "attempted_at": "ISO8601", "call_allowed": false }`
+  - Payload: `{ "number_id": 1, "phone_number": "0912...", "status": "CONNECTED" | "FAILED" | "NOT_INTERESTED" | "MISSED" | "HANGUP" | "DISCONNECTED", "reason": "optional", "attempted_at": "ISO8601", "call_allowed": false }`
   - Updates number status, increments attempts, clears assignment, logs attempt, and if `call_allowed` is sent (true/false) it updates the global enable flag accordingly (e.g., dialer can shut off dispatch by sending `call_allowed=false`).
 
 ## Number validation & dedupe
@@ -99,7 +101,13 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - Backend CORS allowlist is controlled via `CORS_ORIGINS` in `.env` (JSON array). Default allows localhost ports 5173/80 for the Vite dev server. Add your deployed frontend domain when hosting.
 
 ## Migrations (Alembic)
-- Tables auto-create on startup via `Base.metadata.create_all` for local/dev. In production, prefer Alembic to manage schema changes. Initialize Alembic (`alembic init`) and create revision scripts when evolving models; then run `alembic upgrade head`. No migration scripts are included yet.
+- Alembic scaffold with initial revision `0001_initial` lives in `backend/alembic/`. Tables also auto-create on startup via `Base.metadata.create_all` for local/dev, but for deployments run migrations:
+  ```bash
+  cd backend
+  # ensure DATABASE_URL is set (e.g., via .env)
+  ../venv/bin/alembic upgrade head
+  ```
+- When models change, generate a new revision: `../venv/bin/alembic revision --autogenerate -m "desc"` then `../venv/bin/alembic upgrade head`.
 
 ## Tests
 - Basic tests cover phone normalization and schedule next-start helper: `PYTHONPATH=backend pytest backend/tests` (deps required).
@@ -108,20 +116,11 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - All sensitive config via `.env`; never commit real secrets.
 - REST layer is thin; business logic sits in `app/services/*`.
 - Tables auto-create on startup via `Base.metadata.create_all`; migrate with Alembic later if needed.
+- JWT tokens default to 1-day expiry (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1440).
 
 ## Deployment (systemd + nginx)
-- Use `deploy/systemd/salehi-panel.service.example` as a template for systemd (Gunicorn with Uvicorn workers, points to backend/.env and venv).
-- Use `deploy/nginx/panel.conf.example` as a template to serve the built frontend and proxy `/api` to the backend.
+- Systemd and nginx templates live inside the Ansible roles: `deploy/ansible/roles/backend/templates/gunicorn.service.j2` and `deploy/ansible/roles/nginx/templates/site.conf.j2`. Render them via Ansible or adapt manually.
 - Update paths, domain, and SSL certs as needed.
-
-## Migrations (Alembic)
-- Alembic scaffold added under `backend/alembic/`. To apply the current schema on a server:
-  ```bash
-  cd backend
-  # set DATABASE_URL in .env (postgresql+psycopg2://...)
-  ../venv/bin/alembic upgrade head
-  ```
-- When models change, generate a new revision: `../venv/bin/alembic revision --autogenerate -m "desc"` then `../venv/bin/alembic upgrade head`.
 
 ## Ansible (repeatable deploy)
 - A ready-to-use Ansible skeleton is under `deploy/ansible/` (inventory, playbook, roles for common packages, postgres, backend, frontend, nginx, ssl).

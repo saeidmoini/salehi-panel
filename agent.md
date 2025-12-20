@@ -7,8 +7,8 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 - Core: `core/config.py` (Pydantic settings via `.env`), `core/db.py` (SQLAlchemy engine/session), `core/security.py` (bcrypt + JWT).
 - Models: `models/*` (AdminUser, PhoneNumber + CallStatus enum, ScheduleConfig/Window, CallAttempt, DialerBatch).
 - Schemas: `schemas/*` Pydantic v2 models matching the API.
-- Services: business logic in `services/*` (auth, phone number validation/dedup, schedule evaluation, dialer batch selection and result logging).
-- API layer: thin routers in `api/*` for auth, admins, schedule, numbers, and dialer endpoints; dependencies in `api/deps.py`.
+- Services: business logic in `services/*` (auth, phone number validation/dedup, schedule evaluation, dialer batch selection and result logging, stats aggregations).
+- API layer: thin routers in `api/*` for auth, admins, schedule, numbers, dialer endpoints, and stats; dependencies in `api/deps.py`.
 - Frontend: Vite React app in `frontend/` with auth context, protected routes, basic pages for dashboard, numbers, schedule, and admin users. Tailwind config defines a `brand` palette.
 
 ## Where to put things
@@ -38,6 +38,7 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 
 ## Config & environment
 - Backend `.env` (see `backend/.env.example`): DB URL, `SECRET_KEY`, `DIALER_TOKEN`, batch sizes, timezone, `CORS_ORIGINS` (JSON array for allowed frontend origins).
+- JWT expiry defaults to 1 day (`ACCESS_TOKEN_EXPIRE_MINUTES`).
 - Frontend `.env` (see `frontend/.env.example`): `VITE_API_BASE`.
 - `.gitignore` already ignores envs, node_modules, venv, builds. Keep it updated when new tools are added. Ansible secrets: `deploy/ansible/group_vars/prod.yml` is ignored; use the provided `prod.sample.yml` as a template and/or Ansible Vault for secrets.
 
@@ -47,8 +48,8 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 ## Deployment/Server
 - ASGI ready (uvicorn/gunicorn). Tables auto-create via `Base.metadata.create_all`; add Alembic migrations for production changes.
 - Keep dialer token secret; do not expose dialer routes without auth.
-- Templates for ops are under `deploy/` (systemd, nginx, and Ansible skeleton). Adjust paths/env/certs per environment.
-- Alembic scaffold is under `backend/alembic/`. Use `alembic revision --autogenerate` + `alembic upgrade head` when models change; ensure `DATABASE_URL` is set in `.env`.
+- Ops automation lives under `deploy/ansible/` (roles for backend/frontend/nginx/systemd/ssl); systemd + nginx templates are in `roles/backend/templates/gunicorn.service.j2` and `roles/nginx/templates/site.conf.j2`.
+- Alembic scaffold (with initial `0001_initial`) is under `backend/alembic/`. Use `alembic revision --autogenerate` + `alembic upgrade head` when models change; ensure `DATABASE_URL` is set in `.env`.
 - Ansible tags: `init` (one-time: DB/user creation, systemd unit, SSL/ACME, optional admin seed), `deploy` (git pull, pip with gunicorn, Alembic upgrade, systemd restart, nginx config/reload and removes default site), `frontend` (npm install/build), `ssl` (ACME/Arvan). For updates run `--tags deploy,frontend --skip-tags init,ssl`; first install run `--tags init,deploy,frontend,ssl`. Keep `initial_admin_user/password` empty after first seed to avoid repeats.
 - Queue safety: numbers assigned to a batch are locked; stale assignments auto-unlock after `ASSIGNMENT_TIMEOUT_MINUTES` (default 60) so they can return to IN_QUEUE if the dialer crashes.
 

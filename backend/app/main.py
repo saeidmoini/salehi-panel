@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .core.db import Base, engine
 from .core.config import get_settings
-from .api import auth, admins, schedule, numbers, dialer
+from .api import auth, admins, schedule, numbers, dialer, stats
 
 settings = get_settings()
 
@@ -24,6 +24,7 @@ app.include_router(admins.router, prefix="/api/admins", tags=["admins"])
 app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
 app.include_router(numbers.router, prefix="/api/numbers", tags=["numbers"])
 app.include_router(dialer.router, prefix="/api/dialer", tags=["dialer"])
+app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 
 
 @app.get("/health")
