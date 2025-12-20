@@ -134,6 +134,13 @@ const DashboardPage = () => {
     return { labels, datasets }
   }, [trend, selectedStatuses])
 
+  const attemptedCount = useMemo(() => {
+    if (!numbersSummary) return null
+    const inQueue = numbersSummary.status_counts.find((s) => s.status === 'IN_QUEUE')?.count ?? 0
+    const value = numbersSummary.total_numbers - inQueue
+    return value < 0 ? 0 : value
+  }, [numbersSummary])
+
   const toggleStatusFilter = (status: string) => {
     setSelectedStatuses((prev) =>
       prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
@@ -167,8 +174,13 @@ const DashboardPage = () => {
               <h3 className="font-semibold">نمای کلی شماره‌ها</h3>
               <p className="text-sm text-slate-500">تعداد کل و توزیع وضعیت‌ها</p>
             </div>
-            <div className="text-sm font-semibold text-slate-700">
-              مجموع: {numbersSummary?.total_numbers ?? '-'}
+            <div className="text-right space-y-1">
+              <div className="text-sm font-semibold text-slate-700">
+                مجموع: {numbersSummary?.total_numbers ?? '-'}
+              </div>
+              <div className="text-xs text-slate-600">
+                کل تماس‌های انجام‌شده: {attemptedCount ?? '-'}
+              </div>
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-4">
