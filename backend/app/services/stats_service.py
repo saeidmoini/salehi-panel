@@ -84,7 +84,7 @@ def attempt_trend(db: Session, span: int = 14, granularity: str = "day") -> Atte
     granularity = granularity if granularity in {"day", "hour"} else "day"
     now_tehran = datetime.now(TEHRAN_TZ)
     if granularity == "hour":
-        start_tehran = now_tehran - timedelta(hours=span - 1)
+        start_tehran = now_tehran.replace(minute=0, second=0, microsecond=0) - timedelta(hours=span - 1)
     else:
         start_tehran = _tehran_start_of_day(span - 1)
 
