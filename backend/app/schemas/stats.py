@@ -1,4 +1,5 @@
 from datetime import date
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 from ..models.phone_number import CallStatus
@@ -20,11 +21,12 @@ class AttemptSummary(BaseModel):
     status_counts: list[StatusShare]
 
 
-class DailyStatusBreakdown(BaseModel):
-    day: date = Field(..., description="Tehran-local date")
+class TimeBucketBreakdown(BaseModel):
+    bucket: datetime = Field(..., description="Start time of bucket in Tehran time")
     total_attempts: int
     status_counts: list[StatusShare]
 
 
 class AttemptTrendResponse(BaseModel):
-    days: list[DailyStatusBreakdown]
+    granularity: str = Field(..., description="day or hour")
+    buckets: list[TimeBucketBreakdown]

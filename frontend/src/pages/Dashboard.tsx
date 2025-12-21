@@ -27,14 +27,15 @@ interface AttemptSummary {
   status_counts: StatusShare[]
 }
 
-interface DailyStatusBreakdown {
-  day: string
+interface TimeBucketBreakdown {
+  bucket: string
   total_attempts: number
   status_counts: StatusShare[]
 }
 
 interface AttemptTrendResponse {
-  days: DailyStatusBreakdown[]
+  granularity: 'day' | 'hour'
+  buckets: TimeBucketBreakdown[]
 }
 
 const statusLabels: Record<string, string> = {
@@ -66,7 +67,8 @@ const DashboardPage = () => {
   const [trend, setTrend] = useState<AttemptTrendResponse | null>(null)
   const filteredStatuses = useMemo(() => Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), [])
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(filteredStatuses)
-  const [attemptMode, setAttemptMode] = useState<'all' | 'today'>('all')
+  const [attemptMode, setAttemptMode] = useState<'all' | 'today' | '1h' | '3h' | '7d' | '30d'>('all')
+  const [trendMode, setTrendMode] = useState<'hour6' | 'hour24' | 'day7' | 'day30'>('hour24')
 
   const fetchConfig = async () => {
     setLoadingConfig(true)
@@ -80,26 +82,49 @@ const DashboardPage = () => {
     setNumbersSummary(data)
   }
 
-  const fetchAttemptSummary = async (mode: 'all' | 'today') => {
-    const params = mode === 'today' ? { days: 1 } : {}
+  const fetchAttemptSummary = async (mode: typeof attemptMode) => {
+    const params: Record<string, number | string> = {}
+    if (mode === 'today') params.days = 1
+    if (mode === '1h') params.hours = 1
+    if (mode === '3h') params.hours = 3
+    if (mode === '7d') params.days = 7
+    if (mode === '30d') params.days = 30
     const { data } = await client.get<AttemptSummary>('/api/stats/attempts-summary', { params })
     setAttemptSummary(data)
   }
 
-  const fetchTrend = async () => {
-    const { data } = await client.get<AttemptTrendResponse>('/api/stats/attempt-trend', { params: { days: 14 } })
+  const fetchTrend = async (mode: typeof trendMode) => {
+    const params: Record<string, number | string> = {}
+    if (mode === 'hour6') {
+      params.granularity = 'hour'
+      params.span = 6
+    } else if (mode === 'hour24') {
+      params.granularity = 'hour'
+      params.span = 24
+    } else if (mode === 'day7') {
+      params.granularity = 'day'
+      params.span = 7
+    } else if (mode === 'day30') {
+      params.granularity = 'day'
+      params.span = 30
+    }
+    const { data } = await client.get<AttemptTrendResponse>('/api/stats/attempt-trend', { params })
     setTrend(data)
   }
 
   useEffect(() => {
     fetchConfig()
     fetchNumbers()
-    fetchTrend()
+    fetchTrend(trendMode)
   }, [])
 
   useEffect(() => {
     fetchAttemptSummary(attemptMode)
   }, [attemptMode])
+
+  useEffect(() => {
+    fetchTrend(trendMode)
+  }, [trendMode])
 
   const toggleDialer = async () => {
     if (!config) return
@@ -127,7 +152,7 @@ const DashboardPage = () => {
 
   const attemptedStatusCounts = useMemo(() => {
     if (!attemptSummary) return null
-    const attemptTotal = attemptedSummary.total_attempts
+    const attemptTotal = attemptSummary.total_attempts
     const filtered = attemptSummary.status_counts.filter((s) => s.status !== 'IN_QUEUE')
     return filtered.map((s) => ({
       ...s,
@@ -152,13 +177,17 @@ const DashboardPage = () => {
 
   const lineData = useMemo(() => {
     if (!trend) return null
-    const labels = trend.days.map((d) => dayjs(d.day).calendar('jalali').format('YYYY/MM/DD'))
+    const labels = trend.buckets.map((b) =>
+      trend.granularity === 'hour'
+        ? dayjs(b.bucket).calendar('jalali').format('YYYY/MM/DD HH:mm')
+        : dayjs(b.bucket).calendar('jalali').format('YYYY/MM/DD')
+    )
     const datasets = selectedStatuses.map((status) => {
       const color = statusColors[status] || '#0ea5e9'
       return {
         label: statusLabels[status] || status,
-        data: trend.days.map((day) => {
-          const match = day.status_counts.find((s) => s.status === status)
+        data: trend.buckets.map((bucket) => {
+          const match = bucket.status_counts.find((s) => s.status === status)
           return match ? Number(match.percentage.toFixed(2)) : 0
         }),
         borderColor: color,
@@ -177,7 +206,18 @@ const DashboardPage = () => {
     )
   }
 
-  const attemptModeLabel = attemptMode === 'today' ? 'امروز' : 'کل'
+  const attemptModeLabel =
+    attemptMode === 'today'
+      ? 'امروز'
+      : attemptMode === '1h'
+        ? '۱ ساعت گذشته'
+        : attemptMode === '3h'
+          ? '۳ ساعت گذشته'
+          : attemptMode === '7d'
+            ? '۷ روز گذشته'
+            : attemptMode === '30d'
+              ? '۳۰ روز گذشته'
+              : 'کل'
 
   return (
     <div className="space-y-6">
@@ -206,30 +246,6 @@ const DashboardPage = () => {
               <h3 className="font-semibold">نمای کلی شماره‌ها</h3>
               <p className="text-sm text-slate-500">توذیع وضعیت‌ها (بر اساس تماس‌های گرفته‌شده)</p>
             </div>
-            <div className="flex items-end gap-4">
-              <div className="flex flex-col text-xs bg-slate-50 border border-slate-200 rounded-full px-2 py-1">
-                <span className="font-semibold text-slate-700">حالت داده</span>
-                <div className="flex items-center gap-1">
-                  {[
-                    { key: 'all', label: 'کل' },
-                    { key: 'today', label: 'امروز' },
-                  ].map((item) => (
-                    <button
-                      key={item.key}
-                      className={`px-2 py-1 rounded-full text-xs ${attemptMode === item.key ? 'bg-brand-500 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}
-                      onClick={() => setAttemptMode(item.key as 'all' | 'today')}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-col items-end text-sm text-slate-700 space-y-1">
-                <div>مجموع: <span className="font-semibold">{numbersSummary?.total_numbers ?? '-'}</span></div>
-                <div>تماس‌های انجام‌شده ({attemptModeLabel}): <span className="font-semibold">{attemptedCount ?? '-'}</span></div>
-                <div>در صف: <span className="font-semibold">{inQueueCount ?? '-'}</span></div>
-              </div>
-            </div>
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -249,6 +265,33 @@ const DashboardPage = () => {
               ) : (
                 <div className="text-sm text-slate-500">در حال بارگذاری...</div>
               )}
+              <div className="border border-slate-100 rounded-lg px-3 py-3 bg-slate-50">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-col text-sm text-slate-700 space-y-1">
+                    <div>مجموع: <span className="font-semibold">{numbersSummary?.total_numbers ?? '-'}</span></div>
+                    <div>تماس‌های انجام‌شده ({attemptModeLabel}): <span className="font-semibold">{attemptedCount ?? '-'}</span></div>
+                    <div>در صف: <span className="font-semibold">{inQueueCount ?? '-'}</span></div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1 bg-white border border-slate-200 rounded-full px-2 py-1 text-xs">
+                    {[
+                      { key: 'all', label: 'کل' },
+                      { key: 'today', label: 'امروز' },
+                      { key: '1h', label: '۱س' },
+                      { key: '3h', label: '۳س' },
+                      { key: '7d', label: '۷روز' },
+                      { key: '30d', label: '۳۰روز' },
+                    ].map((item) => (
+                      <button
+                        key={item.key}
+                        className={`px-2 py-1 rounded-full text-xs ${attemptMode === item.key ? 'bg-brand-500 text-white' : 'text-slate-700'}`}
+                        onClick={() => setAttemptMode(item.key as typeof attemptMode)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="flex items-center justify-center">
               {pieData ? (
@@ -279,12 +322,28 @@ const DashboardPage = () => {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="font-semibold">روند درصد وضعیت تماس‌ها (روزانه)</h3>
-            <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت در تماس‌های هر روز (تقویم شمسی، بدون در صف)</p>
+            <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت در تماس‌های هر بازه (تقویم شمسی، بدون در صف)</p>
           </div>
-          <div className="flex flex-wrap gap-2 text-sm">
+          <div className="flex flex-wrap gap-2 text-sm items-center">
+            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-full px-2 py-1 text-xs">
+              {[
+                { key: 'hour6', label: '۶س' },
+                { key: 'hour24', label: '۲۴س' },
+                { key: 'day7', label: '۷روز' },
+                { key: 'day30', label: '۳۰روز' },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  className={`px-2 py-1 rounded-full text-xs ${trendMode === item.key ? 'bg-brand-500 text-white' : 'text-slate-700'}`}
+                  onClick={() => setTrendMode(item.key as typeof trendMode)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
             {Object.entries(statusLabels)
               .filter(([key]) => key !== 'IN_QUEUE')
               .map(([key, label]) => (
