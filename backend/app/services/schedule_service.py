@@ -16,11 +16,13 @@ TEHRAN_TZ = ZoneInfo(settings.timezone)
 
 def ensure_config(db: Session) -> ScheduleConfig:
     _ensure_enabled_column(db)
+    _ensure_disabled_by_dialer_column(db)
     config = db.get(ScheduleConfig, 1)
     if not config:
         config = ScheduleConfig(
             skip_holidays=settings.skip_holidays_default,
             enabled=True,
+            disabled_by_dialer=False,
             version=1,
         )
         db.add(config)
@@ -40,6 +42,15 @@ def _ensure_enabled_column(db: Session) -> None:
     cols = [c["name"] for c in inspector.get_columns("schedule_configs")]
     if "enabled" not in cols:
         conn.execute(text("ALTER TABLE schedule_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE"))
+        db.commit()
+
+
+def _ensure_disabled_by_dialer_column(db: Session) -> None:
+    conn = db.connection()
+    inspector = inspect(conn)
+    cols = [c["name"] for c in inspector.get_columns("schedule_configs")]
+    if "disabled_by_dialer" not in cols:
+        conn.execute(text("ALTER TABLE schedule_configs ADD COLUMN IF NOT EXISTS disabled_by_dialer BOOLEAN DEFAULT FALSE"))
         db.commit()
 
 
@@ -72,6 +83,8 @@ def update_schedule(db: Session, data: ScheduleConfigUpdate) -> ScheduleConfig:
         changed = True
     if data.enabled is not None:
         config.enabled = data.enabled
+        # manual toggle clears dialer error flag
+        config.disabled_by_dialer = False
         changed = True
     if changed:
         config.version += 1

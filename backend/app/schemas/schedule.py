@@ -11,6 +11,7 @@ class ScheduleInterval(BaseModel):
 class ScheduleConfigOut(BaseModel):
     skip_holidays: bool
     enabled: bool
+    disabled_by_dialer: bool = False
     version: int
     intervals: list[ScheduleInterval]
     updated_at: datetime | None = None

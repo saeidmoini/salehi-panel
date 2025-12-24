@@ -96,6 +96,7 @@ def report_result(db: Session, report: DialerReport):
         if config.enabled != report.call_allowed:
             config.enabled = report.call_allowed
             config.version += 1
+        config.disabled_by_dialer = not report.call_allowed
 
     number.status = report.status
     number.last_attempt_at = report.attempted_at

@@ -9,6 +9,7 @@ ChartJS.register(ArcElement, Tooltip, Legend, PointElement, LineElement, Categor
 interface ScheduleConfig {
   enabled: boolean
   version: number
+  disabled_by_dialer?: boolean
 }
 
 interface StatusShare {
@@ -240,6 +241,11 @@ const DashboardPage = () => {
           <div className="text-sm text-slate-700">
             کنترل روشن/خاموش بودن سرور مرکز تماس. در صورت خاموش بودن هیچ شماره‌ای ارسال نمی‌شود.
           </div>
+          {!config?.enabled && config?.disabled_by_dialer && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
+              سیستم با خطا مواجه شد (خاموش توسط مرکز تماس)
+            </div>
+          )}
           <button
             className="rounded bg-brand-500 text-white px-4 py-2 text-sm disabled:opacity-50"
             onClick={toggleDialer}

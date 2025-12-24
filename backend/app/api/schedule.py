@@ -16,6 +16,7 @@ def get_schedule(db: Session = Depends(get_db)):
     return ScheduleConfigOut(
         skip_holidays=config.skip_holidays,
         enabled=config.enabled,
+        disabled_by_dialer=config.disabled_by_dialer or False,
         version=config.version,
         updated_at=config.updated_at,
         intervals=[
@@ -32,6 +33,7 @@ def update_schedule(payload: ScheduleConfigUpdate, db: Session = Depends(get_db)
     return ScheduleConfigOut(
         skip_holidays=config.skip_holidays,
         enabled=config.enabled,
+        disabled_by_dialer=config.disabled_by_dialer or False,
         version=config.version,
         updated_at=config.updated_at,
         intervals=[
