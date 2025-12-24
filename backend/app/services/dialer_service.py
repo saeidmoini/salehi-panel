@@ -90,8 +90,6 @@ def report_result(db: Session, report: DialerReport):
         number = db.query(PhoneNumber).filter(PhoneNumber.phone_number == normalized).first()
         if not number:
             raise HTTPException(status_code=404, detail="Number not found")
-        if number.status != CallStatus.IN_QUEUE:
-            raise HTTPException(status_code=400, detail="Number not in queue")
 
     if report.call_allowed is not None:
         config = ensure_config(db)
