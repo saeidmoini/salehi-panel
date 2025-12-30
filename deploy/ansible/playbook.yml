@@ -1,8 +1,13 @@
 - hosts: prod
   become: true
   pre_tasks:
+    - name: Default env_variant when unset
+      set_fact:
+        env_variant: "{{ env_variant | default('agrad') }}"
+      tags: ["always"]
+
     - name: Load variant vars (env_variant=agrad|salehi)
-      include_vars: "group_vars/prod{{ '_salehi' if env_variant == 'salehi' else '' }}.yml"
+      include_vars: "{{ 'group_vars/prod_salehi.yml' if env_variant == 'salehi' else 'group_vars/prod.yml' }}"
       tags: ["always"]
   roles:
     - common
