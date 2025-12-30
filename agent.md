@@ -52,6 +52,7 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 - Alembic scaffold (with initial `0001_initial`) is under `backend/alembic/`. Use `alembic revision --autogenerate` + `alembic upgrade head` when models change; ensure `DATABASE_URL` is set in `.env`.
 - Ansible tags: `init` (one-time: DB/user creation, systemd unit, SSL/ACME, optional admin seed), `deploy` (git pull, pip with gunicorn, Alembic upgrade, systemd restart, nginx config/reload and removes default site), `frontend` (npm install/build), `ssl` (ACME/Arvan). For updates run `--tags deploy,frontend --skip-tags init,ssl`; first install run `--tags init,deploy,frontend,ssl`. Keep `initial_admin_user/password` empty after first seed to avoid repeats.
 - Queue safety: numbers assigned to a batch are locked; stale assignments auto-unlock after `ASSIGNMENT_TIMEOUT_MINUTES` (default 60) so they can return to IN_QUEUE if the dialer crashes.
+- Branch/vars discipline: `agrad` branch uses `deploy/ansible/group_vars/prod.yml`; `salehi` branch uses `deploy/ansible/group_vars/prod_salehi.yml`. Run Ansible with `-e env_variant=agrad|salehi` to pick the right vars.
 
 ## Always
 - Update README.md when behavior/config changes.

@@ -1,7 +1,9 @@
 - hosts: prod
   become: true
-  vars_files:
-    - group_vars/prod.yml
+  pre_tasks:
+    - name: Load variant vars (env_variant=agrad|salehi)
+      include_vars: "group_vars/prod{{ '_salehi' if env_variant == 'salehi' else '' }}.yml"
+      tags: ["always"]
   roles:
     - common
     - postgres

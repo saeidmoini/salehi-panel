@@ -121,6 +121,7 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 ## Deployment (systemd + nginx)
 - Systemd and nginx templates live inside the Ansible roles: `deploy/ansible/roles/backend/templates/gunicorn.service.j2` and `deploy/ansible/roles/nginx/templates/site.conf.j2`. Render them via Ansible or adapt manually.
 - Update paths, domain, and SSL certs as needed.
+- Branch/vars discipline: `agrad` branch uses `deploy/ansible/group_vars/prod.yml`. `salehi` branch uses `deploy/ansible/group_vars/prod_salehi.yml`. When running Ansible, pick the right vars via `-e env_variant=agrad` (default) or `-e env_variant=salehi`.
 
 ## Ansible (repeatable deploy)
 - A ready-to-use Ansible skeleton is under `deploy/ansible/` (inventory, playbook, roles for common packages, postgres, backend, frontend, nginx, ssl).

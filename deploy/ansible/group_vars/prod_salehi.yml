@@ -1,0 +1,50 @@
+project_name: salehi-panel
+project_root: /opt/salehi-panel
+repo_url: https://github.com/saeidmoini/salehi-panel.git
+project_user: root           # change per project/server
+project_group: root
+
+backend_dir: "{{ project_root }}/backend"
+frontend_dir: "{{ project_root }}/frontend"
+venv_path: "{{ project_root }}/venv"
+
+gunicorn_bind: 127.0.0.1:8000   # change per project to avoid port conflicts
+gunicorn_workers: 4
+gunicorn_module: app.main:app
+env_file: "{{ backend_dir }}/.env"
+backend_framework: fastapi      # set to django for Django projects
+django_manage_dir: "{{ backend_dir }}"   # override if manage.py elsewhere
+django_static_dir: "{{ backend_dir }}/staticfiles"
+
+db_name: salehi_panel
+db_user: salehi_user
+db_pass: "Agrad724"
+db_host: localhost
+db_port: 5432
+database_url: "postgresql+psycopg2://{{ db_user }}:{{ db_pass }}@{{ db_host }}:{{ db_port }}/{{ db_name }}"
+
+secret_key: "agradkey"
+dialer_token: "agradtoken"
+cors_origins:
+  - "http://localhost:5173"
+  - "http://127.0.0.1:5173"
+  - "https://digiforoush.com"
+
+domain: digiforoush.com
+ssl_fullchain: "/etc/nginx/ssl/{{ domain }}/fullchain.crt"
+ssl_privkey: "/etc/nginx/ssl/{{ domain }}/privkey.key"
+ssl_dir: "/etc/nginx/ssl/{{ domain }}"
+enable_ssl: true            # set to false to serve plain HTTP (e.g., when domain not ready)
+arvan_token: "20d40626-5937-59cc-aec6-677988be54e5"   # set when you want Arvan DNS-01 issuance; leave empty to skip
+acme_sh_path: "/root/.acme.sh/acme.sh"
+acme_email: "coldsun1997@gmail.com"
+acme_reset_account: false
+
+nginx_http_port: 80         # change per project if sharing IP without domains
+nginx_https_port: 443
+
+node_command: npm
+frontend_api_base: "https://{{ domain }}"
+
+initial_admin_user: ""
+initial_admin_password: ""
