@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..schemas.auth import LoginRequest, Token
 from ..core.security import get_current_active_user
-from ..schemas.user import AdminUserOut
+from ..schemas.user import AdminUserOut, AdminSelfUpdate
 from ..services import auth_service
 
 router = APIRouter()
@@ -19,3 +19,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=AdminUserOut)
 def get_me(current_user=Depends(get_current_active_user)):
     return current_user
+
+
+@router.put("/me", response_model=AdminUserOut)
+def update_me(payload: AdminSelfUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_active_user)):
+    return auth_service.update_self(db, current_user.id, payload)

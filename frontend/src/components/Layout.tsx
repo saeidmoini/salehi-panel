@@ -7,6 +7,7 @@ const navItems = [
   { to: '/numbers', label: 'مدیریت شماره‌ها', roles: ['ADMIN', 'AGENT'] as Array<'ADMIN' | 'AGENT'> },
   { to: '/schedule', label: 'زمان‌بندی تماس', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'> },
   { to: '/admins', label: 'مدیریت مدیران', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'> },
+  { to: '/profile', label: 'حساب کاربری', roles: ['ADMIN', 'AGENT'] as Array<'ADMIN' | 'AGENT'> },
 ]
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {

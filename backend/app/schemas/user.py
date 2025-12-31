@@ -42,3 +42,11 @@ class AdminUserOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AdminSelfUpdate(BaseModel):
+    username: str | None = None
+    password: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None

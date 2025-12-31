@@ -7,6 +7,7 @@ import DashboardPage from './pages/Dashboard'
 import NumbersPage from './pages/Numbers'
 import SchedulePage from './pages/Schedule'
 import AdminUsersPage from './pages/AdminUsers'
+import ProfilePage from './pages/Profile'
 
 const App = () => {
   return (
@@ -49,6 +50,16 @@ const App = () => {
             <ProtectedRoute allowedRoles={['ADMIN']}>
               <Layout>
                 <AdminUsersPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <ProfilePage />
               </Layout>
             </ProtectedRoute>
           }

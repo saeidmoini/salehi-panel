@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 
 from ..models.user import AdminUser, UserRole
 from ..schemas.auth import LoginRequest
-from ..schemas.user import AdminUserCreate, AdminUserUpdate
+from ..schemas.user import AdminUserCreate, AdminUserUpdate, AdminSelfUpdate
 from ..core.security import verify_password, get_password_hash, create_access_token
 from ..core.config import get_settings
 from .phone_service import normalize_phone
@@ -143,3 +143,39 @@ def list_active_agents(db: Session) -> list[AdminUser]:
         .order_by(AdminUser.first_name.nullslast(), AdminUser.last_name.nullslast(), AdminUser.id)
         .all()
     )
+
+
+def update_self(db: Session, user_id: int, data: AdminSelfUpdate) -> AdminUser:
+    user = db.query(AdminUser).filter(AdminUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if data.username and data.username != user.username:
+        existing = (
+            db.query(AdminUser)
+            .filter(AdminUser.username == data.username, AdminUser.id != user_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+        user.username = data.username
+    if data.password:
+        user.password_hash = get_password_hash(data.password)
+    if data.first_name is not None:
+        user.first_name = data.first_name
+    if data.last_name is not None:
+        user.last_name = data.last_name
+    if data.phone_number is not None:
+        normalized_phone = normalize_phone(data.phone_number) if data.phone_number else None
+        if data.phone_number and not normalized_phone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid phone number")
+        existing_phone = (
+            db.query(AdminUser)
+            .filter(AdminUser.phone_number == normalized_phone, AdminUser.id != user_id)
+            .first()
+        )
+        if existing_phone:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already in use")
+        user.phone_number = normalized_phone
+    db.commit()
+    db.refresh(user)
+    return user
