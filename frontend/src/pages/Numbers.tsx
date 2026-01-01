@@ -556,23 +556,23 @@ const NumbersPage = () => {
           <div className="text-sm">در حال بارگذاری...</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm text-right whitespace-nowrap">
+            <table className="min-w-full table-auto text-sm text-right">
               <thead>
                 <tr className="text-slate-500">
-                  <th className="py-2 text-right w-10">
+                  <th className="py-2 text-right w-10 whitespace-nowrap">
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleCurrentPage} />
                   </th>
-                  <th className="py-2 text-right">شماره</th>
-                  <th className="text-right cursor-pointer select-none" onClick={() => handleSort('status')}>
+                  <th className="py-2 text-right whitespace-nowrap">شماره</th>
+                  <th className="text-right cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('status')}>
                     وضعیت {sortBy === 'status' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="text-right">تعداد تلاش</th>
-                  <th className="text-right w-32 cursor-pointer select-none" onClick={() => handleSort('last_attempt_at')}>
+                  <th className="text-right whitespace-nowrap">تعداد تلاش</th>
+                  <th className="text-right w-32 cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('last_attempt_at')}>
                     آخرین تلاش {sortBy === 'last_attempt_at' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="text-right w-40">کارشناس</th>
-                  <th className="text-right w-64">پیام تماس</th>
-                  <th className="text-right w-80">اقدامات</th>
+                  <th className="text-right w-40 whitespace-nowrap">کارشناس</th>
+                  <th className="text-right">پیام تماس</th>
+                  <th className="text-right w-64 whitespace-nowrap">اقدامات</th>
                 </tr>
               </thead>
               <tbody>
@@ -587,19 +587,19 @@ const NumbersPage = () => {
                         title={!isRowSelectable(n) && !isSuper ? 'این وضعیت قابل تغییر یا حذف نیست' : ''}
                       />
                     </td>
-                    <td className="py-2 font-mono text-xs">{n.phone_number}</td>
-                    <td className="text-right">
+                    <td className="py-2 font-mono text-xs whitespace-nowrap">{n.phone_number}</td>
+                    <td className="text-right whitespace-nowrap">
                       <span
                         className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColors[n.status] || 'bg-slate-100 text-slate-700'}`}
                       >
                         {statusLabels[n.status] || n.status}
                       </span>
                     </td>
-                    <td className="text-right">{n.total_attempts}</td>
-                    <td className="text-right">
+                    <td className="text-right whitespace-nowrap">{n.total_attempts}</td>
+                    <td className="text-right whitespace-nowrap">
                       {n.last_attempt_at ? dayjs(n.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
                     </td>
-                    <td className="text-right">
+                    <td className="text-right whitespace-nowrap">
                       {n.assigned_agent ? (
                         <div className="space-y-0.5">
                           <div className="text-sm">
@@ -614,15 +614,15 @@ const NumbersPage = () => {
                         '-'
                       )}
                     </td>
-                    <td className="text-right max-w-[260px]">
-                      <div className="text-xs text-slate-700 truncate" title={n.last_user_message || ''}>
-                        {n.last_user_message || '-'}
+                    <td className="text-right">
+                      <div className="text-xs text-slate-700 whitespace-pre-line break-words">
+                        {n.last_user_message || '—'}
                       </div>
                     </td>
-                    <td className="text-right w-80">
-                      <div className="flex items-center justify-start gap-4">
+                    <td className="text-right w-64 whitespace-nowrap">
+                      <div className="flex items-center justify-start gap-3">
                         <select
-                          className="rounded border border-slate-200 px-2 py-1 text-xs w-40"
+                          className="rounded border border-slate-200 px-2 py-1 text-xs w-32"
                           value={n.status}
                           onChange={(e) => updateStatus(n.id, e.target.value)}
                           disabled={!canModifyStatus(n.status)}
