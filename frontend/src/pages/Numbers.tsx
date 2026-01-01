@@ -570,9 +570,9 @@ const NumbersPage = () => {
                   <th className="text-right w-32 cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('last_attempt_at')}>
                     آخرین تلاش {sortBy === 'last_attempt_at' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="text-right w-40 whitespace-nowrap">کارشناس</th>
-                  <th className="text-right">پیام تماس</th>
-                  <th className="text-right w-64 whitespace-nowrap">اقدامات</th>
+                  <th className="text-right w-36 whitespace-nowrap">کارشناس</th>
+                  <th className="text-right min-w-[220px] max-w-[520px]">پیام تماس</th>
+                  <th className="text-right w-52 whitespace-nowrap">اقدامات</th>
                 </tr>
               </thead>
               <tbody>
@@ -614,15 +614,15 @@ const NumbersPage = () => {
                         '-'
                       )}
                     </td>
-                    <td className="text-right">
-                      <div className="text-xs text-slate-700 whitespace-pre-line break-words">
+                    <td className="text-right align-top">
+                      <div className="text-xs text-slate-700 whitespace-pre-line break-words max-w-[520px]">
                         {n.last_user_message || '—'}
                       </div>
                     </td>
-                    <td className="text-right w-64 whitespace-nowrap">
-                      <div className="flex items-center justify-start gap-3">
+                    <td className="text-right w-52 whitespace-nowrap">
+                      <div className="flex items-center justify-start gap-2">
                         <select
-                          className="rounded border border-slate-200 px-2 py-1 text-xs w-32"
+                          className="rounded border border-slate-200 px-2 py-1 text-xs w-28"
                           value={n.status}
                           onChange={(e) => updateStatus(n.id, e.target.value)}
                           disabled={!canModifyStatus(n.status)}
