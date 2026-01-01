@@ -6,6 +6,7 @@ interface AdminUser {
   username: string
   is_active: boolean
   role: 'ADMIN' | 'AGENT'
+  is_superuser?: boolean
   first_name?: string | null
   last_name?: string | null
   phone_number?: string | null
@@ -150,20 +151,26 @@ const AdminUsersPage = () => {
                 <td className="font-mono text-xs">{u.phone_number || '—'}</td>
                 <td>{u.is_active ? 'فعال' : 'غیرفعال'}</td>
                 <td className="space-x-3 space-x-reverse">
-                  <button className="text-xs text-brand-700" onClick={() => toggleActive(u)}>
-                    {u.is_active ? 'غیرفعال کن' : 'فعال کن'}
-                  </button>
-                  <button
-                    className="text-xs text-red-600"
-                    onClick={async () => {
-                      const ok = window.confirm('کاربر حذف شود؟')
-                      if (!ok) return
-                      await client.delete(`/api/admins/${u.id}`)
-                      fetchUsers()
-                    }}
-                  >
-                    حذف
-                  </button>
+                  {u.is_superuser ? (
+                    <span className="text-xs text-slate-400">—</span>
+                  ) : (
+                    <>
+                      <button className="text-xs text-brand-700" onClick={() => toggleActive(u)}>
+                        {u.is_active ? 'غیرفعال کن' : 'فعال کن'}
+                      </button>
+                      <button
+                        className="text-xs text-red-600"
+                        onClick={async () => {
+                          const ok = window.confirm('کاربر حذف شود؟')
+                          if (!ok) return
+                          await client.delete(`/api/admins/${u.id}`)
+                          fetchUsers()
+                        }}
+                      >
+                        حذف
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
