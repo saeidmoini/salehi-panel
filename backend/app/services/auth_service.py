@@ -65,6 +65,13 @@ def update_admin_user(db: Session, user_id: int, data: AdminUserUpdate) -> Admin
     user = db.query(AdminUser).filter(AdminUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.is_superuser:
+        if data.is_active is not None and data.is_active is False:
+            raise HTTPException(status_code=400, detail="Cannot deactivate primary admin")
+        if data.role is not None and data.role != UserRole.ADMIN:
+            raise HTTPException(status_code=400, detail="Primary admin role cannot be changed")
+        if data.is_superuser is not None and data.is_superuser is False:
+            raise HTTPException(status_code=400, detail="Primary admin cannot lose superuser status")
     if data.username:
         existing = (
             db.query(AdminUser)
@@ -124,6 +131,8 @@ def delete_admin_user(db: Session, user_id: int) -> None:
     user = db.query(AdminUser).filter(AdminUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if user.is_superuser:
+        raise HTTPException(status_code=400, detail="Primary admin cannot be deleted")
     if user.role == UserRole.ADMIN:
         remaining_admins = (
             db.query(AdminUser)
