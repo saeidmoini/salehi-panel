@@ -492,10 +492,10 @@ const NumbersPage = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-600">عملیات گروهی</label>
+          <div className="flex flex-wrap items-center gap-2 w-full">
+            <label className="text-xs text-slate-600 whitespace-nowrap">عملیات گروهی</label>
             <select
-              className="rounded border border-slate-200 px-2 py-1 text-sm"
+              className="rounded border border-slate-200 px-2 py-1 text-sm w-full sm:w-auto"
               value={bulkAction}
               onChange={(e) => setBulkAction(e.target.value as any)}
             >
@@ -505,7 +505,7 @@ const NumbersPage = () => {
             </select>
             {bulkAction === 'update_status' && (
               <select
-                className="rounded border border-slate-200 px-2 py-1 text-sm"
+                className="rounded border border-slate-200 px-2 py-1 text-sm w-full sm:w-auto"
                 value={bulkStatus}
                 onChange={(e) => setBulkStatus(e.target.value)}
               >
@@ -517,20 +517,20 @@ const NumbersPage = () => {
               </select>
             )}
             <button
-              className="rounded bg-brand-500 text-white px-3 py-1 text-sm disabled:opacity-50"
+              className="rounded bg-brand-500 text-white px-3 py-1 text-sm disabled:opacity-50 w-full sm:w-auto"
               disabled={!canBulk}
               onClick={handleBulk}
             >
               اعمال
             </button>
             <button
-              className="rounded border border-slate-200 px-3 py-1 text-sm disabled:opacity-50"
+              className="rounded border border-slate-200 px-3 py-1 text-sm disabled:opacity-50 w-full sm:w-auto"
               disabled={!canExport || exporting}
               onClick={handleExport}
             >
               {exporting ? 'در حال آماده‌سازی...' : 'خروجی اکسل'}
             </button>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-slate-500 w-full">
               عملیات فقط روی وضعیت‌های در صف، از دست رفته، مشغول، خاموش و بن‌شده انجام می‌شود.
             </div>
           </div>
