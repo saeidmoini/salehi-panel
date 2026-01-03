@@ -6,6 +6,7 @@ from typing import Iterable, Sequence
 from fastapi import HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.dialects.postgresql import insert
 
 from ..models.phone_number import PhoneNumber, CallStatus
 from ..models.call_attempt import CallAttempt
@@ -70,20 +71,32 @@ def add_numbers(db: Session, payload: PhoneNumberCreate, current_user: AdminUser
     _require_admin(current_user)
     normalized = [normalize_phone(p) for p in payload.phone_numbers]
     invalid_numbers = [p for p, norm in zip(payload.phone_numbers, normalized) if norm is None]
-    valid_numbers = [norm for norm in normalized if norm]
-    existing_numbers = set(
-        n[0]
-        for n in db.execute(select(PhoneNumber.phone_number).where(PhoneNumber.phone_number.in_(valid_numbers)))
-    )
-    to_insert = [n for n in valid_numbers if n not in existing_numbers]
 
-    for number in to_insert:
-        db.add(PhoneNumber(phone_number=number, status=CallStatus.IN_QUEUE))
-    db.commit()
+    # Keep first occurrence of each valid number to avoid duplicate work in one batch
+    seen: set[str] = set()
+    unique_valid: list[str] = []
+    for norm in normalized:
+        if not norm:
+            continue
+        if norm in seen:
+            continue
+        seen.add(norm)
+        unique_valid.append(norm)
+
+    inserted = 0
+    if unique_valid:
+        stmt = (
+            insert(PhoneNumber)
+            .values([{"phone_number": n, "status": CallStatus.IN_QUEUE} for n in unique_valid])
+            .on_conflict_do_nothing(index_elements=[PhoneNumber.phone_number])
+        )
+        result = db.execute(stmt)
+        inserted = result.rowcount or 0
+        db.commit()
 
     return {
-        "inserted": len(to_insert),
-        "duplicates": len(valid_numbers) - len(to_insert),
+        "inserted": inserted,
+        "duplicates": len(unique_valid) - inserted,
         "invalid": len(invalid_numbers),
         "invalid_samples": invalid_numbers[:5],
     }
