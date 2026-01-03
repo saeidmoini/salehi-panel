@@ -90,9 +90,9 @@ def fetch_next_batch(db: Session, size: int | None = None):
 
 
 def report_result(db: Session, report: DialerReport):
-    normalized_phone = normalize_phone(report.phone_number)
-    if not normalized_phone:
-        raise HTTPException(status_code=404, detail="Number not found")
+    normalized_phone = normalize_phone(report.phone_number) if report.phone_number else None
+    if not normalized_phone and report.number_id is None:
+        raise HTTPException(status_code=400, detail="phone_number or number_id is required")
     number: PhoneNumber | None = None
     if report.number_id is not None:
         number = db.get(PhoneNumber, report.number_id)
