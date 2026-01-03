@@ -84,3 +84,5 @@ class PhoneNumberExportRequest(BaseModel):
     agent_id: int | None = None
     sort_by: str = Field(default="created_at", pattern="^(created_at|last_attempt_at|status)$")
     sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
+    start_date: str | None = None
+    end_date: str | None = None
