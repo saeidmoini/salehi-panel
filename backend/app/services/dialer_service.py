@@ -96,12 +96,19 @@ def report_result(db: Session, report: DialerReport):
     number: PhoneNumber | None = None
     if report.number_id is not None:
         number = db.get(PhoneNumber, report.number_id)
-        if not number or number.phone_number != normalized_phone:
-            raise HTTPException(status_code=404, detail="Number not found or mismatch")
-    else:
-        number = db.query(PhoneNumber).filter(PhoneNumber.phone_number == normalized_phone).first()
-        if not number:
-            raise HTTPException(status_code=404, detail="Number not found")
+        if number and normalized_phone and number.phone_number != normalized_phone:
+            # If the provided id does not match the phone (e.g., concurrent/fallback cases), ignore the id
+            number = None
+
+    if not number:
+        number = (
+            db.query(PhoneNumber)
+            .filter(PhoneNumber.phone_number == normalized_phone)
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+    if not number:
+        raise HTTPException(status_code=404, detail="Number not found")
 
     agent = _resolve_agent(db, report)
 
