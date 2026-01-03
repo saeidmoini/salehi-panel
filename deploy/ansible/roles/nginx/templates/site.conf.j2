@@ -11,6 +11,7 @@ server {
     ssl_certificate     {{ ssl_fullchain }};
     ssl_certificate_key {{ ssl_privkey }};
 
+    client_max_body_size 20m;
     root {{ frontend_dir }}/dist;
     index index.html;
 
@@ -30,6 +31,7 @@ server {
     listen {{ nginx_http_port }};
     server_name {{ domain | default('_') }};
 
+    client_max_body_size 20m;
     root {{ frontend_dir }}/dist;
     index index.html;
 

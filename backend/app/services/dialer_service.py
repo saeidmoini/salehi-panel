@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from ..core.config import get_settings
 from ..models.phone_number import PhoneNumber, CallStatus
@@ -101,6 +102,8 @@ def report_result(db: Session, report: DialerReport):
             number = None
 
     if not number:
+        if not normalized_phone:
+            raise HTTPException(status_code=404, detail="Number not found")
         number = (
             db.query(PhoneNumber)
             .filter(PhoneNumber.phone_number == normalized_phone)
@@ -108,7 +111,25 @@ def report_result(db: Session, report: DialerReport):
             .first()
         )
     if not number:
-        raise HTTPException(status_code=404, detail="Number not found")
+        try:
+            number = PhoneNumber(
+                phone_number=normalized_phone,
+                status=CallStatus.IN_QUEUE,
+                total_attempts=0,
+            )
+            db.add(number)
+            db.commit()
+            db.refresh(number)
+        except IntegrityError:
+            db.rollback()
+            number = (
+                db.query(PhoneNumber)
+                .filter(PhoneNumber.phone_number == normalized_phone)
+                .with_for_update(skip_locked=True)
+                .first()
+            )
+        if not number:
+            raise HTTPException(status_code=404, detail="Number not found")
 
     agent = _resolve_agent(db, report)
 
