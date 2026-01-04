@@ -12,6 +12,8 @@ class ScheduleConfig(Base):
     skip_holidays: Mapped[bool] = mapped_column(Boolean, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     disabled_by_dialer: Mapped[bool] = mapped_column(Boolean, default=False)
+    wallet_balance: Mapped[int] = mapped_column(Integer, default=0)
+    cost_per_connected: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

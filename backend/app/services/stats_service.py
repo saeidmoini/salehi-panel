@@ -8,9 +8,17 @@ from ..core.config import get_settings
 from ..models.phone_number import PhoneNumber, CallStatus
 from ..models.call_attempt import CallAttempt
 from ..schemas.stats import NumbersSummary, StatusShare, AttemptTrendResponse, TimeBucketBreakdown, AttemptSummary
-from .schedule_service import TEHRAN_TZ
+from .schedule_service import TEHRAN_TZ, ensure_config
 
 settings = get_settings()
+CONNECTED_STATUSES = {
+    CallStatus.DISCONNECTED,
+    CallStatus.CONNECTED,
+    CallStatus.FAILED,
+    CallStatus.NOT_INTERESTED,
+    CallStatus.HANGUP,
+    CallStatus.UNKNOWN,
+}
 
 
 def numbers_summary(db: Session) -> NumbersSummary:
@@ -71,7 +79,14 @@ def attempt_summary(db: Session, days: int | None = None, hours: int | None = No
         if status not in existing:
             status_shares.append(StatusShare(status=status, count=0, percentage=0.0))
     status_shares.sort(key=lambda s: s.status.value)
-    return AttemptSummary(total_attempts=total, status_counts=status_shares)
+    connected_count = sum(s.count for s in status_shares if s.status in CONNECTED_STATUSES)
+    connected_percentage = (connected_count / total * 100) if total else 0.0
+    return AttemptSummary(
+        total_attempts=total,
+        status_counts=status_shares,
+        connected_count=connected_count,
+        connected_percentage=connected_percentage,
+    )
 
 
 def _tehran_start_of_day(days_back: int) -> datetime:
@@ -135,3 +150,34 @@ def attempt_trend(db: Session, span: int = 14, granularity: str = "day") -> Atte
         )
 
     return AttemptTrendResponse(granularity=granularity, buckets=bucket_list)
+
+
+def cost_summary(db: Session) -> dict:
+    cfg = ensure_config(db)
+    rate = cfg.cost_per_connected or 0
+    now_tehran = datetime.now(TEHRAN_TZ)
+    start_of_day = datetime.combine(now_tehran.date(), time(0, 0), tzinfo=TEHRAN_TZ).astimezone(timezone.utc)
+    start_of_month = datetime.combine(now_tehran.date().replace(day=1), time(0, 0), tzinfo=TEHRAN_TZ).astimezone(timezone.utc)
+
+    daily_count = (
+        db.query(func.count(CallAttempt.id))
+        .filter(CallAttempt.status.in_([status.value for status in CONNECTED_STATUSES]))
+        .filter(CallAttempt.attempted_at >= start_of_day)
+        .scalar()
+        or 0
+    )
+    monthly_count = (
+        db.query(func.count(CallAttempt.id))
+        .filter(CallAttempt.status.in_([status.value for status in CONNECTED_STATUSES]))
+        .filter(CallAttempt.attempted_at >= start_of_month)
+        .scalar()
+        or 0
+    )
+    return {
+        "currency": "Toman",
+        "cost_per_connected": rate,
+        "daily_count": daily_count,
+        "daily_cost": daily_count * rate,
+        "monthly_count": monthly_count,
+        "monthly_cost": monthly_count * rate,
+    }

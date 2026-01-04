@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from ..api.deps import get_active_admin
 from ..core.db import get_db
-from ..schemas.stats import NumbersSummary, AttemptTrendResponse, AttemptSummary
+from ..schemas.stats import NumbersSummary, AttemptTrendResponse, AttemptSummary, CostSummary
 from ..services import stats_service
 
 router = APIRouter(dependencies=[Depends(get_active_admin)])
@@ -30,3 +30,8 @@ def get_attempts_summary(
     db: Session = Depends(get_db),
 ):
     return stats_service.attempt_summary(db, days=days, hours=hours)
+
+
+@router.get("/costs", response_model=CostSummary)
+def get_costs(db: Session = Depends(get_db)):
+    return stats_service.cost_summary(db)

@@ -17,6 +17,12 @@ def get_active_admin(current_user=Depends(get_current_active_user)):
     return current_user
 
 
+def get_superuser(current_user=Depends(get_current_active_user)):
+    if not getattr(current_user, "is_superuser", False):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser only")
+    return current_user
+
+
 def get_dialer_auth(credentials: HTTPAuthorizationCredentials = Depends(http_bearer)):
     if not credentials or credentials.credentials != settings.dialer_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid dialer token")

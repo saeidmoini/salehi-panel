@@ -8,6 +8,7 @@ import NumbersPage from './pages/Numbers'
 import SchedulePage from './pages/Schedule'
 import AdminUsersPage from './pages/AdminUsers'
 import ProfilePage from './pages/Profile'
+import BillingPage from './pages/Billing'
 
 const App = () => {
   return (
@@ -50,6 +51,16 @@ const App = () => {
             <ProtectedRoute allowedRoles={['ADMIN']}>
               <Layout>
                 <AdminUsersPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/billing"
+          element={
+            <ProtectedRoute allowedRoles={['ADMIN']} requireSuperuser>
+              <Layout>
+                <BillingPage />
               </Layout>
             </ProtectedRoute>
           }

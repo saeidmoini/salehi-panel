@@ -10,6 +10,8 @@ interface ScheduleConfig {
   enabled: boolean
   version: number
   disabled_by_dialer?: boolean
+  wallet_balance?: number
+  cost_per_connected?: number
 }
 
 interface StatusShare {
@@ -26,6 +28,8 @@ interface NumbersSummary {
 interface AttemptSummary {
   total_attempts: number
   status_counts: StatusShare[]
+  connected_count: number
+  connected_percentage: number
 }
 
 interface TimeBucketBreakdown {
@@ -37,6 +41,22 @@ interface TimeBucketBreakdown {
 interface AttemptTrendResponse {
   granularity: 'day' | 'hour'
   buckets: TimeBucketBreakdown[]
+}
+
+interface BillingInfo {
+  wallet_balance: number
+  cost_per_connected: number
+  currency: string
+  disabled_by_dialer?: boolean
+}
+
+interface CostSummary {
+  currency: string
+  cost_per_connected: number
+  daily_count: number
+  daily_cost: number
+  monthly_count: number
+  monthly_cost: number
 }
 
 const statusLabels: Record<string, string> = {
@@ -51,6 +71,7 @@ const statusLabels: Record<string, string> = {
   POWER_OFF: 'خاموش',
   BANNED: 'بن شده',
   UNKNOWN: 'نامشخص',
+  CONNECTED_CALLS: 'تماس‌های برقرار شده',
 }
 
 const statusColors: Record<string, string> = {
@@ -65,7 +86,10 @@ const statusColors: Record<string, string> = {
   POWER_OFF: '#475569',
   BANNED: '#ef476f',
   UNKNOWN: '#0ea5e9',
+  CONNECTED_CALLS: '#0ea5e9',
 }
+
+const connectedStatuses = ['DISCONNECTED', 'CONNECTED', 'FAILED', 'NOT_INTERESTED', 'HANGUP', 'UNKNOWN']
 
 const DashboardPage = () => {
   const [config, setConfig] = useState<ScheduleConfig | null>(null)
@@ -75,9 +99,18 @@ const DashboardPage = () => {
   const [attemptSummary, setAttemptSummary] = useState<AttemptSummary | null>(null)
   const [trend, setTrend] = useState<AttemptTrendResponse | null>(null)
   const filteredStatuses = useMemo(() => Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), [])
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(filteredStatuses)
-  const [attemptMode, setAttemptMode] = useState<'all' | 'today' | '1h' | '3h' | '7d' | '30d'>('all')
-  const [trendMode, setTrendMode] = useState<'hour6' | 'hour24' | 'day7' | 'day30'>('hour24')
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([
+    'DISCONNECTED',
+    'CONNECTED',
+    'UNKNOWN',
+    'NOT_INTERESTED',
+    'CONNECTED_CALLS',
+    'HANGUP',
+  ])
+  const [attemptMode, setAttemptMode] = useState<'all' | 'today' | '1h' | '7d' | '30d'>('all')
+  const [trendMode, setTrendMode] = useState<'hour24' | 'day7' | 'day30' | 'day180'>('hour24')
+  const [billing, setBilling] = useState<BillingInfo | null>(null)
+  const [costs, setCosts] = useState<CostSummary | null>(null)
 
   const fetchConfig = async () => {
     setLoadingConfig(true)
@@ -95,7 +128,6 @@ const DashboardPage = () => {
     const params: Record<string, number | string> = {}
     if (mode === 'today') params.days = 1
     if (mode === '1h') params.hours = 1
-    if (mode === '3h') params.hours = 3
     if (mode === '7d') params.days = 7
     if (mode === '30d') params.days = 30
     const { data } = await client.get<AttemptSummary>('/api/stats/attempts-summary', { params })
@@ -104,10 +136,7 @@ const DashboardPage = () => {
 
   const fetchTrend = async (mode: typeof trendMode) => {
     const params: Record<string, number | string> = {}
-    if (mode === 'hour6') {
-      params.granularity = 'hour'
-      params.span = 6
-    } else if (mode === 'hour24') {
+    if (mode === 'hour24') {
       params.granularity = 'hour'
       params.span = 24
     } else if (mode === 'day7') {
@@ -116,15 +145,30 @@ const DashboardPage = () => {
     } else if (mode === 'day30') {
       params.granularity = 'day'
       params.span = 30
+    } else if (mode === 'day180') {
+      params.granularity = 'day'
+      params.span = 180
     }
     const { data } = await client.get<AttemptTrendResponse>('/api/stats/attempt-trend', { params })
     setTrend(data)
+  }
+
+  const fetchBilling = async () => {
+    const { data } = await client.get<BillingInfo>('/api/billing')
+    setBilling(data)
+  }
+
+  const fetchCosts = async () => {
+    const { data } = await client.get<CostSummary>('/api/stats/costs')
+    setCosts(data)
   }
 
   useEffect(() => {
     fetchConfig()
     fetchNumbers()
     fetchTrend(trendMode)
+    fetchBilling()
+    fetchCosts()
   }, [])
 
   useEffect(() => {
@@ -197,6 +241,12 @@ const DashboardPage = () => {
         label: statusLabels[status] || status,
         statusKey: status,
         data: trend.buckets.map((bucket) => {
+          if (status === 'CONNECTED_CALLS') {
+            const counts = bucket.status_counts.filter((s) => connectedStatuses.includes(s.status))
+            const total = bucket.total_attempts || 1
+            const sumCount = counts.reduce((acc, cur) => acc + cur.count, 0)
+            return Number(((sumCount / total) * 100 || 0).toFixed(2))
+          }
           const match = bucket.status_counts.find((s) => s.status === status)
           return match ? Number(match.percentage.toFixed(2)) : 0
         }),
@@ -221,22 +271,20 @@ const DashboardPage = () => {
       ? 'امروز'
       : attemptMode === '1h'
         ? '۱ ساعت گذشته'
-        : attemptMode === '3h'
-          ? '۳ ساعت گذشته'
-          : attemptMode === '7d'
-            ? '۷ روز گذشته'
-            : attemptMode === '30d'
-              ? '۳۰ روز گذشته'
-              : 'کل'
+        : attemptMode === '7d'
+          ? '۷ روز گذشته'
+          : attemptMode === '30d'
+            ? '۳۰ روز گذشته'
+            : 'کل'
 
   const trendModeLabel =
-    trendMode === 'hour6'
-      ? '۶ ساعت گذشته'
-      : trendMode === 'hour24'
-        ? '۲۴ ساعت گذشته'
-        : trendMode === 'day7'
-          ? '۷ روز گذشته'
-          : '۳۰ روز گذشته'
+    trendMode === 'hour24'
+      ? '۲۴ ساعت گذشته'
+      : trendMode === 'day7'
+        ? '۷ روز گذشته'
+        : trendMode === 'day30'
+          ? '۳۰ روز گذشته'
+          : '۶ ماه گذشته'
 
   return (
     <div className="space-y-6">
@@ -249,19 +297,33 @@ const DashboardPage = () => {
           <div className="text-sm text-slate-700">
             کنترل روشن/خاموش بودن سرور مرکز تماس. در صورت خاموش بودن هیچ شماره‌ای ارسال نمی‌شود.
           </div>
+          {billing && billing.wallet_balance <= 0 && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
+              موجودی کیف پول صفر است؛ لطفا کیف پول را شارژ کنید. سیستم روشن نخواهد شد تا شارژ شود.
+            </div>
+          )}
           {!config?.enabled && config?.disabled_by_dialer && (
             <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
-              سیستم با خطا مواجه شد (خاموش توسط مرکز تماس)
+              سیستم با خطا مواجه شد (خاموش توسط مرکز تماس/کمبود موجودی)
             </div>
           )}
           <button
             className="rounded bg-brand-500 text-white px-4 py-2 text-sm disabled:opacity-50"
             onClick={toggleDialer}
-            disabled={saving || loadingConfig}
+            disabled={saving || loadingConfig || (billing && billing.wallet_balance <= 0)}
           >
             {saving ? 'در حال اعمال...' : config?.enabled ? 'خاموش کردن' : 'روشن کردن'}
           </button>
           <div className="text-xs text-slate-500">نسخه زمان‌بندی: {config?.version ?? '-'}</div>
+          <div className="text-sm text-slate-700 space-y-1">
+            <div>موجودی کیف پول: <span className="font-semibold">{billing ? billing.wallet_balance.toLocaleString() : '-'}</span> {billing?.currency || 'تومان'}</div>
+            <div>هزینه هر تماس برقرار شده: <span className="font-semibold">{billing ? billing.cost_per_connected.toLocaleString() : '-'}</span> {billing?.currency || 'تومان'}</div>
+            <div className="text-xs text-slate-500">در صورت صفر شدن موجودی، سیستم خودکار خاموش می‌شود.</div>
+          </div>
+          <div className="text-sm text-slate-700 space-y-1">
+            <div>هزینه امروز: <span className="font-semibold">{costs ? costs.daily_cost.toLocaleString() : '-'}</span> {costs?.currency || 'تومان'} ({costs ? costs.daily_count : '-' } تماس برقرار)</div>
+            <div>هزینه ماه جاری: <span className="font-semibold">{costs ? costs.monthly_cost.toLocaleString() : '-'}</span> {costs?.currency || 'تومان'} ({costs ? costs.monthly_count : '-' } تماس برقرار)</div>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 md:col-span-3 lg:col-span-2">
@@ -294,6 +356,7 @@ const DashboardPage = () => {
                   <div className="flex flex-col text-sm text-slate-700 space-y-1">
                     <div>مجموع: <span className="font-semibold">{numbersSummary?.total_numbers ?? '-'}</span></div>
                     <div>تماس‌های انجام‌شده ({attemptModeLabel}): <span className="font-semibold">{attemptedCount ?? '-'}</span></div>
+                    <div>تماس‌های برقرار شده: <span className="font-semibold">{attemptSummary?.connected_count ?? '-'}</span> <span className="text-xs text-slate-500">({(attemptSummary?.connected_percentage ?? 0).toFixed(1)}%)</span></div>
                     <div>در صف: <span className="font-semibold">{inQueueCount ?? '-'}</span></div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1 bg-white border border-slate-200 rounded-full px-2 py-1 text-xs">
@@ -301,7 +364,6 @@ const DashboardPage = () => {
                       { key: 'all', label: 'کل' },
                       { key: 'today', label: 'امروز' },
                       { key: '1h', label: '۱س' },
-                      { key: '3h', label: '۳س' },
                       { key: '7d', label: '۷روز' },
                       { key: '30d', label: '۳۰روز' },
                     ].map((item) => (
@@ -354,10 +416,10 @@ const DashboardPage = () => {
           <div className="flex flex-wrap gap-2 text-sm items-center">
             <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-full px-2 py-1 text-xs">
               {[
-                { key: 'hour6', label: '۶س' },
                 { key: 'hour24', label: '۲۴س' },
                 { key: 'day7', label: '۷روز' },
                 { key: 'day30', label: '۳۰روز' },
+                { key: 'day180', label: '۶ماه' },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -407,6 +469,12 @@ const DashboardPage = () => {
                     label: (ctx) => {
                         const bucket = trend?.buckets[ctx.dataIndex]
                         const statusKey = (ctx.dataset as any).statusKey as string | undefined
+                        if (statusKey === 'CONNECTED_CALLS' && bucket) {
+                          const counts = bucket.status_counts.filter((s) => connectedStatuses.includes(s.status))
+                          const sumCount = counts.reduce((acc, cur) => acc + cur.count, 0)
+                          const total = bucket.total_attempts ?? 0
+                          return `${ctx.dataset.label}: ${ctx.parsed.y}% (${sumCount}/${total})`
+                        }
                         const match = statusKey ? bucket?.status_counts.find((s) => s.status === statusKey) : undefined
                         const count = match?.count ?? 0
                         const total = bucket?.total_attempts ?? 0

@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError
 
 from ..core.config import get_settings
 from ..models.phone_number import PhoneNumber, CallStatus
@@ -12,11 +13,19 @@ from ..models.dialer_batch import DialerBatch
 from ..models.call_attempt import CallAttempt
 from ..models.user import AdminUser, UserRole
 from ..schemas.dialer import DialerReport
-from .schedule_service import is_call_allowed, ensure_config, TEHRAN_TZ
+from .schedule_service import is_call_allowed, ensure_config, TEHRAN_TZ, charge_for_connected_call
 from .phone_service import normalize_phone
 from . import auth_service
 
 settings = get_settings()
+CONNECTED_STATUSES = {
+    CallStatus.DISCONNECTED,
+    CallStatus.CONNECTED,
+    CallStatus.FAILED,
+    CallStatus.NOT_INTERESTED,
+    CallStatus.HANGUP,
+    CallStatus.UNKNOWN,
+}
 
 
 def fetch_next_batch(db: Session, size: int | None = None):
@@ -128,6 +137,24 @@ def report_result(db: Session, report: DialerReport):
                 .with_for_update(skip_locked=True)
                 .first()
             )
+    if not number:
+        try:
+            number = PhoneNumber(
+                phone_number=normalized_phone,
+                status=CallStatus.IN_QUEUE,
+                total_attempts=0,
+            )
+            db.add(number)
+            db.commit()
+            db.refresh(number)
+        except IntegrityError:
+            db.rollback()
+            number = (
+                db.query(PhoneNumber)
+                .filter(PhoneNumber.phone_number == normalized_phone)
+                .with_for_update(skip_locked=True)
+                .first()
+            )
         if not number:
             raise HTTPException(status_code=404, detail="Number not found")
 
@@ -162,6 +189,8 @@ def report_result(db: Session, report: DialerReport):
         )
     )
     db.commit()
+    if report.status in CONNECTED_STATUSES:
+        charge_for_connected_call(db)
     db.refresh(number)
     return number
 

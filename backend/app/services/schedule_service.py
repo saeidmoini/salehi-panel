@@ -17,12 +17,15 @@ TEHRAN_TZ = ZoneInfo(settings.timezone)
 def ensure_config(db: Session) -> ScheduleConfig:
     _ensure_enabled_column(db)
     _ensure_disabled_by_dialer_column(db)
+    _ensure_billing_columns(db)
     config = db.get(ScheduleConfig, 1)
     if not config:
         config = ScheduleConfig(
             skip_holidays=settings.skip_holidays_default,
             enabled=True,
             disabled_by_dialer=False,
+            wallet_balance=0,
+            cost_per_connected=150,
             version=1,
         )
         db.add(config)
@@ -30,6 +33,14 @@ def ensure_config(db: Session) -> ScheduleConfig:
         db.refresh(config)
     if config.enabled is None:
         config.enabled = True
+        db.commit()
+        db.refresh(config)
+    if config.cost_per_connected is None:
+        config.cost_per_connected = 150
+        db.commit()
+        db.refresh(config)
+    if config.wallet_balance is None:
+        config.wallet_balance = 0
         db.commit()
         db.refresh(config)
     return config
@@ -51,6 +62,18 @@ def _ensure_disabled_by_dialer_column(db: Session) -> None:
     cols = [c["name"] for c in inspector.get_columns("schedule_configs")]
     if "disabled_by_dialer" not in cols:
         conn.execute(text("ALTER TABLE schedule_configs ADD COLUMN IF NOT EXISTS disabled_by_dialer BOOLEAN DEFAULT FALSE"))
+        db.commit()
+
+
+def _ensure_billing_columns(db: Session) -> None:
+    conn = db.connection()
+    inspector = inspect(conn)
+    cols = [c["name"] for c in inspector.get_columns("schedule_configs")]
+    if "wallet_balance" not in cols:
+        conn.execute(text("ALTER TABLE schedule_configs ADD COLUMN IF NOT EXISTS wallet_balance INTEGER DEFAULT 0"))
+        db.commit()
+    if "cost_per_connected" not in cols:
+        conn.execute(text("ALTER TABLE schedule_configs ADD COLUMN IF NOT EXISTS cost_per_connected INTEGER DEFAULT 150"))
         db.commit()
 
 
@@ -82,6 +105,8 @@ def update_schedule(db: Session, data: ScheduleConfigUpdate) -> ScheduleConfig:
         config.skip_holidays = data.skip_holidays
         changed = True
     if data.enabled is not None:
+        if data.enabled and config.wallet_balance is not None and config.wallet_balance <= 0:
+            raise HTTPException(status_code=400, detail="Wallet balance is zero. Please recharge before enabling.")
         config.enabled = data.enabled
         # manual toggle clears dialer error flag
         config.disabled_by_dialer = False
@@ -93,6 +118,69 @@ def update_schedule(db: Session, data: ScheduleConfigUpdate) -> ScheduleConfig:
     return config
 
 
+def charge_for_connected_call(db: Session) -> int:
+    """
+    Deducts cost per connected call from wallet. Returns remaining balance.
+    Automatically disables dialing if balance hits zero.
+    """
+    ensure_config(db)
+    cfg = db.query(ScheduleConfig).with_for_update().get(1)
+    if not cfg:
+        raise HTTPException(status_code=500, detail="Billing config missing")
+    cost = cfg.cost_per_connected or 0
+    if cost <= 0:
+        return cfg.wallet_balance or 0
+
+    current_balance = cfg.wallet_balance or 0
+    if current_balance <= 0:
+        cfg.enabled = False
+        cfg.disabled_by_dialer = True
+        cfg.version += 1
+        db.commit()
+        return 0
+
+    new_balance = current_balance - cost
+    if new_balance < 0:
+        new_balance = 0
+    cfg.wallet_balance = new_balance
+    if new_balance == 0:
+        cfg.enabled = False
+        cfg.disabled_by_dialer = True
+        cfg.version += 1
+    db.commit()
+    db.refresh(cfg)
+    return new_balance
+
+
+def get_billing_info(db: Session) -> dict:
+    cfg = ensure_config(db)
+    return {
+        "wallet_balance": cfg.wallet_balance or 0,
+        "cost_per_connected": cfg.cost_per_connected or 0,
+        "currency": "Toman",
+        "disabled_by_dialer": cfg.disabled_by_dialer,
+    }
+
+
+def update_billing(db: Session, wallet_balance: int | None = None, cost_per_connected: int | None = None) -> ScheduleConfig:
+    cfg = ensure_config(db)
+    changed = False
+    if wallet_balance is not None:
+        cfg.wallet_balance = wallet_balance
+        changed = True
+    if cost_per_connected is not None:
+        cfg.cost_per_connected = cost_per_connected
+        changed = True
+    if changed:
+        cfg.version += 1
+        # If balance now > 0, allow manual enabling later (do not force enable automatically)
+        if cfg.wallet_balance and cfg.wallet_balance > 0:
+            cfg.disabled_by_dialer = False if cfg.enabled else cfg.disabled_by_dialer
+        db.commit()
+        db.refresh(cfg)
+    return cfg
+
+
 def is_holiday(date_value: datetime) -> bool:
     # Placeholder: hook for Iranian holiday calendar integration
     return False
@@ -101,6 +189,14 @@ def is_holiday(date_value: datetime) -> bool:
 def is_call_allowed(now: datetime | None, db: Session) -> tuple[bool, str | None, int]:
     config = ensure_config(db)
     now = (now or datetime.now(TEHRAN_TZ)).astimezone(TEHRAN_TZ)
+    if config.wallet_balance is not None and config.wallet_balance <= 0:
+        if config.enabled:
+            config.enabled = False
+            config.disabled_by_dialer = True
+            config.version += 1
+            db.commit()
+            db.refresh(config)
+        return False, "insufficient_funds", settings.long_retry_seconds
     if not config.enabled:
         return False, "disabled", settings.long_retry_seconds
     if config.skip_holidays and is_holiday(now):

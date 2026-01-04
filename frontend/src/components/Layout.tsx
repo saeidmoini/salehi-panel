@@ -6,6 +6,7 @@ const navItems = [
   { to: '/', label: 'داشبورد', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'> },
   { to: '/numbers', label: 'مدیریت شماره‌ها', roles: ['ADMIN', 'AGENT'] as Array<'ADMIN' | 'AGENT'> },
   { to: '/schedule', label: 'زمان‌بندی تماس', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'> },
+  { to: '/billing', label: 'تنظیمات هزینه', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'>, superOnly: true },
   { to: '/admins', label: 'مدیریت مدیران', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'> },
   { to: '/profile', label: 'حساب کاربری', roles: ['ADMIN', 'AGENT'] as Array<'ADMIN' | 'AGENT'> },
 ]
@@ -15,7 +16,10 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
   const isAdmin = user?.role === 'ADMIN'
-  const availableNav = navItems.filter((item) => !item.roles || item.roles.includes(user?.role || 'ADMIN'))
+  const availableNav = navItems.filter((item) => {
+    if (item.superOnly && !user?.is_superuser) return false
+    return !item.roles || item.roles.includes(user?.role || 'ADMIN')
+  })
 
   const handleLogout = () => {
     logout()

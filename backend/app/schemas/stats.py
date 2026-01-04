@@ -19,6 +19,8 @@ class NumbersSummary(BaseModel):
 class AttemptSummary(BaseModel):
     total_attempts: int
     status_counts: list[StatusShare]
+    connected_count: int
+    connected_percentage: float
 
 
 class TimeBucketBreakdown(BaseModel):
@@ -30,3 +32,12 @@ class TimeBucketBreakdown(BaseModel):
 class AttemptTrendResponse(BaseModel):
     granularity: str = Field(..., description="day or hour")
     buckets: list[TimeBucketBreakdown]
+
+
+class CostSummary(BaseModel):
+    currency: str = "Toman"
+    cost_per_connected: int
+    daily_count: int
+    daily_cost: int
+    monthly_count: int
+    monthly_cost: int

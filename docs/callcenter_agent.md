@@ -1,5 +1,11 @@
 # Call Center Integration Guide
 
+> Keep this file updated with every behavior change, and keep tests in sync whenever APIs or logic change.
+
+## Connected vs. Not Connected Calls
+- Connected calls (used for costs/metrics): `DISCONNECTED`, `CONNECTED`, `FAILED`, `NOT_INTERESTED`, `HANGUP`, `UNKNOWN`.
+- Not connected calls: `IN_QUEUE`, `MISSED`, `BUSY`, `POWER_OFF`, `BANNED`.
+
 This guide explains the minimal APIs your call-center or AI agent needs to interact with the dialer panel.
 
 ## Auth for the dialer
