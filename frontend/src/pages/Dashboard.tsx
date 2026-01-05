@@ -10,8 +10,6 @@ interface ScheduleConfig {
   enabled: boolean
   version: number
   disabled_by_dialer?: boolean
-  wallet_balance?: number
-  cost_per_connected?: number
 }
 
 interface StatusShare {
@@ -41,22 +39,6 @@ interface TimeBucketBreakdown {
 interface AttemptTrendResponse {
   granularity: 'day' | 'hour'
   buckets: TimeBucketBreakdown[]
-}
-
-interface BillingInfo {
-  wallet_balance: number
-  cost_per_connected: number
-  currency: string
-  disabled_by_dialer?: boolean
-}
-
-interface CostSummary {
-  currency: string
-  cost_per_connected: number
-  daily_count: number
-  daily_cost: number
-  monthly_count: number
-  monthly_cost: number
 }
 
 const statusLabels: Record<string, string> = {
@@ -109,8 +91,6 @@ const DashboardPage = () => {
   ])
   const [attemptMode, setAttemptMode] = useState<'all' | 'today' | '1h' | '7d' | '30d'>('all')
   const [trendMode, setTrendMode] = useState<'hour24' | 'day7' | 'day30' | 'day180'>('hour24')
-  const [billing, setBilling] = useState<BillingInfo | null>(null)
-  const [costs, setCosts] = useState<CostSummary | null>(null)
 
   const fetchConfig = async () => {
     setLoadingConfig(true)
@@ -153,22 +133,10 @@ const DashboardPage = () => {
     setTrend(data)
   }
 
-  const fetchBilling = async () => {
-    const { data } = await client.get<BillingInfo>('/api/billing')
-    setBilling(data)
-  }
-
-  const fetchCosts = async () => {
-    const { data } = await client.get<CostSummary>('/api/stats/costs')
-    setCosts(data)
-  }
-
   useEffect(() => {
     fetchConfig()
     fetchNumbers()
     fetchTrend(trendMode)
-    fetchBilling()
-    fetchCosts()
   }, [])
 
   useEffect(() => {
@@ -297,33 +265,14 @@ const DashboardPage = () => {
           <div className="text-sm text-slate-700">
             کنترل روشن/خاموش بودن سرور مرکز تماس. در صورت خاموش بودن هیچ شماره‌ای ارسال نمی‌شود.
           </div>
-          {billing && billing.wallet_balance <= 0 && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
-              موجودی کیف پول صفر است؛ لطفا کیف پول را شارژ کنید. سیستم روشن نخواهد شد تا شارژ شود.
-            </div>
-          )}
-          {!config?.enabled && config?.disabled_by_dialer && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
-              سیستم با خطا مواجه شد (خاموش توسط مرکز تماس/کمبود موجودی)
-            </div>
-          )}
           <button
             className="rounded bg-brand-500 text-white px-4 py-2 text-sm disabled:opacity-50"
             onClick={toggleDialer}
-            disabled={saving || loadingConfig || (billing && billing.wallet_balance <= 0)}
+            disabled={saving || loadingConfig}
           >
             {saving ? 'در حال اعمال...' : config?.enabled ? 'خاموش کردن' : 'روشن کردن'}
           </button>
           <div className="text-xs text-slate-500">نسخه زمان‌بندی: {config?.version ?? '-'}</div>
-          <div className="text-sm text-slate-700 space-y-1">
-            <div>موجودی کیف پول: <span className="font-semibold">{billing ? billing.wallet_balance.toLocaleString() : '-'}</span> {billing?.currency || 'تومان'}</div>
-            <div>هزینه هر تماس برقرار شده: <span className="font-semibold">{billing ? billing.cost_per_connected.toLocaleString() : '-'}</span> {billing?.currency || 'تومان'}</div>
-            <div className="text-xs text-slate-500">در صورت صفر شدن موجودی، سیستم خودکار خاموش می‌شود.</div>
-          </div>
-          <div className="text-sm text-slate-700 space-y-1">
-            <div>هزینه امروز: <span className="font-semibold">{costs ? costs.daily_cost.toLocaleString() : '-'}</span> {costs?.currency || 'تومان'} ({costs ? costs.daily_count : '-' } تماس برقرار)</div>
-            <div>هزینه ماه جاری: <span className="font-semibold">{costs ? costs.monthly_cost.toLocaleString() : '-'}</span> {costs?.currency || 'تومان'} ({costs ? costs.monthly_count : '-' } تماس برقرار)</div>
-          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 md:col-span-3 lg:col-span-2">
