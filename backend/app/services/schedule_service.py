@@ -105,8 +105,6 @@ def update_schedule(db: Session, data: ScheduleConfigUpdate) -> ScheduleConfig:
         config.skip_holidays = data.skip_holidays
         changed = True
     if data.enabled is not None:
-        if data.enabled and config.wallet_balance is not None and config.wallet_balance <= 0:
-            raise HTTPException(status_code=400, detail="Wallet balance is zero. Please recharge before enabling.")
         config.enabled = data.enabled
         # manual toggle clears dialer error flag
         config.disabled_by_dialer = False
@@ -119,37 +117,8 @@ def update_schedule(db: Session, data: ScheduleConfigUpdate) -> ScheduleConfig:
 
 
 def charge_for_connected_call(db: Session) -> int:
-    """
-    Deducts cost per connected call from wallet. Returns remaining balance.
-    Automatically disables dialing if balance hits zero.
-    """
-    ensure_config(db)
-    cfg = db.query(ScheduleConfig).with_for_update().get(1)
-    if not cfg:
-        raise HTTPException(status_code=500, detail="Billing config missing")
-    cost = cfg.cost_per_connected or 0
-    if cost <= 0:
-        return cfg.wallet_balance or 0
-
-    current_balance = cfg.wallet_balance or 0
-    if current_balance <= 0:
-        cfg.enabled = False
-        cfg.disabled_by_dialer = True
-        cfg.version += 1
-        db.commit()
-        return 0
-
-    new_balance = current_balance - cost
-    if new_balance < 0:
-        new_balance = 0
-    cfg.wallet_balance = new_balance
-    if new_balance == 0:
-        cfg.enabled = False
-        cfg.disabled_by_dialer = True
-        cfg.version += 1
-    db.commit()
-    db.refresh(cfg)
-    return new_balance
+    cfg = ensure_config(db)
+    return cfg.wallet_balance or 0
 
 
 def get_billing_info(db: Session) -> dict:
@@ -189,14 +158,6 @@ def is_holiday(date_value: datetime) -> bool:
 def is_call_allowed(now: datetime | None, db: Session) -> tuple[bool, str | None, int]:
     config = ensure_config(db)
     now = (now or datetime.now(TEHRAN_TZ)).astimezone(TEHRAN_TZ)
-    if config.wallet_balance is not None and config.wallet_balance <= 0:
-        if config.enabled:
-            config.enabled = False
-            config.disabled_by_dialer = True
-            config.version += 1
-            db.commit()
-            db.refresh(config)
-        return False, "insufficient_funds", settings.long_retry_seconds
     if not config.enabled:
         return False, "disabled", settings.long_retry_seconds
     if config.skip_holidays and is_holiday(now):

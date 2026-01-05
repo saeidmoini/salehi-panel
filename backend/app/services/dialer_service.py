@@ -13,7 +13,7 @@ from ..models.dialer_batch import DialerBatch
 from ..models.call_attempt import CallAttempt
 from ..models.user import AdminUser, UserRole
 from ..schemas.dialer import DialerReport
-from .schedule_service import is_call_allowed, ensure_config, TEHRAN_TZ, charge_for_connected_call
+from .schedule_service import is_call_allowed, ensure_config, TEHRAN_TZ
 from .phone_service import normalize_phone
 from . import auth_service
 
@@ -189,8 +189,7 @@ def report_result(db: Session, report: DialerReport):
         )
     )
     db.commit()
-    if report.status in CONNECTED_STATUSES:
-        charge_for_connected_call(db)
+    # In agrad branch, no wallet charge
     db.refresh(number)
     return number
 

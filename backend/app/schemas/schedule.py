@@ -12,8 +12,6 @@ class ScheduleConfigOut(BaseModel):
     skip_holidays: bool
     enabled: bool
     disabled_by_dialer: bool = False
-    wallet_balance: int = 0
-    cost_per_connected: int = 0
     version: int
     intervals: list[ScheduleInterval]
     updated_at: datetime | None = None
