@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useCompany } from '../hooks/useCompany'
 import client from '../api/client'
 import dayjs from 'dayjs'
-import { Chart as ChartJS, ArcElement, Tooltip, Legend, PointElement, LineElement, CategoryScale, LinearScale, Filler } from 'chart.js'
-import { Pie, Line } from 'react-chartjs-2'
+import jalaliday from 'jalaliday'
+import { Chart as ChartJS, PointElement, LineElement, CategoryScale, LinearScale, Tooltip, Legend, Filler } from 'chart.js'
+import { Line } from 'react-chartjs-2'
 
-ChartJS.register(ArcElement, Tooltip, Legend, PointElement, LineElement, CategoryScale, LinearScale, Filler)
+dayjs.extend(jalaliday)
+ChartJS.register(PointElement, LineElement, CategoryScale, LinearScale, Tooltip, Legend, Filler)
 
 interface ScheduleConfig {
   enabled: boolean
@@ -14,28 +17,27 @@ interface ScheduleConfig {
   cost_per_connected?: number
 }
 
-interface StatusShare {
-  status: string
-  count: number
-  percentage: number
+interface BillingInfo {
+  wallet_balance: number
+  cost_per_connected: number
+  currency: string
+}
+
+interface CostSummary {
+  currency: string
+  daily_cost: number
+  daily_count: number
 }
 
 interface NumbersSummary {
   total_numbers: number
-  status_counts: StatusShare[]
-}
-
-interface AttemptSummary {
-  total_attempts: number
-  status_counts: StatusShare[]
-  connected_count: number
-  connected_percentage: number
+  status_counts: Array<{ status: string; count: number }>
 }
 
 interface TimeBucketBreakdown {
   bucket: string
   total_attempts: number
-  status_counts: StatusShare[]
+  status_counts: Array<{ status: string; count: number; percentage: number }>
 }
 
 interface AttemptTrendResponse {
@@ -43,190 +45,181 @@ interface AttemptTrendResponse {
   buckets: TimeBucketBreakdown[]
 }
 
-interface BillingInfo {
-  wallet_balance: number
-  cost_per_connected: number
-  currency: string
-  disabled_by_dialer?: boolean
+interface DashboardGroup {
+  id: number
+  name: string
+  display_name: string
+  statuses: Record<string, number>
+  total: number
+  billable: number
+  inbound: number
 }
 
-interface CostSummary {
-  currency: string
-  cost_per_connected: number
-  daily_count: number
-  daily_cost: number
-  monthly_count: number
-  monthly_cost: number
+interface DashboardStats {
+  groups: DashboardGroup[]
+  totals: Record<string, number>
 }
 
+// Updated status labels in Persian
 const statusLabels: Record<string, string> = {
-  IN_QUEUE: 'در صف تماس',
-  MISSED: 'از دست رفته',
-  CONNECTED: 'موفق',
-  FAILED: 'خطا',
+  CONNECTED: 'وصل شده',
+  DISCONNECTED: 'وصل نشده',
   NOT_INTERESTED: 'عدم نیاز کاربر',
   HANGUP: 'قطع تماس توسط کاربر',
-  DISCONNECTED: 'ناموفق',
-  BUSY: 'مشغول',
-  POWER_OFF: 'خاموش',
-  BANNED: 'بن شده',
   UNKNOWN: 'نامشخص',
-  CONNECTED_CALLS: 'تماس‌های برقرار شده',
+  MISSED: 'بی‌پاسخ',
+  BUSY: 'اشغال',
+  POWER_OFF: 'خاموش',
+  FAILED: 'خطا',
+  INBOUND_CALL: 'تماس ورودی',
+  IN_QUEUE: 'در صف تماس',
 }
 
 const statusColors: Record<string, string> = {
-  IN_QUEUE: '#f59e0b',
-  MISSED: '#fb923c',
   CONNECTED: '#10b981',
-  FAILED: '#ef4444',
+  DISCONNECTED: '#6b7280',
   NOT_INTERESTED: '#94a3b8',
   HANGUP: '#a855f7',
-  DISCONNECTED: '#6b7280',
-  BUSY: '#f59e0b',
-  POWER_OFF: '#475569',
-  BANNED: '#ef476f',
-  UNKNOWN: '#0ea5e9',
-  CONNECTED_CALLS: '#0ea5e9',
+  UNKNOWN: '#f59e0b',
+  MISSED: '#fb923c',
+  BUSY: '#e11d48',
+  POWER_OFF: '#1e293b',
+  FAILED: '#ef4444',
+  INBOUND_CALL: '#0ea5e9',
 }
 
-const connectedStatuses = ['DISCONNECTED', 'CONNECTED', 'FAILED', 'NOT_INTERESTED', 'HANGUP', 'UNKNOWN']
+const BILLABLE_STATUSES = [
+  'CONNECTED', 'NOT_INTERESTED', 'HANGUP', 'UNKNOWN', 'DISCONNECTED', 'FAILED'
+]
+
+type TimeFilter = '1h' | 'today' | 'yesterday' | '7d' | '30d'
+type GroupBy = 'scenario' | 'line'
 
 const DashboardPage = () => {
+  const { company } = useCompany()
   const [config, setConfig] = useState<ScheduleConfig | null>(null)
-  const [loadingConfig, setLoadingConfig] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [numbersSummary, setNumbersSummary] = useState<NumbersSummary | null>(null)
-  const [attemptSummary, setAttemptSummary] = useState<AttemptSummary | null>(null)
-  const [trend, setTrend] = useState<AttemptTrendResponse | null>(null)
-  const filteredStatuses = useMemo(() => Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), [])
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([
-    'DISCONNECTED',
-    'CONNECTED',
-    'UNKNOWN',
-    'NOT_INTERESTED',
-    'CONNECTED_CALLS',
-    'HANGUP',
-  ])
-  const [attemptMode, setAttemptMode] = useState<'all' | 'today' | '1h' | '7d' | '30d'>('all')
-  const [trendMode, setTrendMode] = useState<'hour24' | 'day7' | 'day30' | 'day180'>('hour24')
   const [billing, setBilling] = useState<BillingInfo | null>(null)
   const [costs, setCosts] = useState<CostSummary | null>(null)
+  const [numbersSummary, setNumbersSummary] = useState<NumbersSummary | null>(null)
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [trend, setTrend] = useState<AttemptTrendResponse | null>(null)
+  const [trendMode, setTrendMode] = useState<'hour6' | 'hour24' | 'day7' | 'day30'>('hour24')
+  const filteredStatuses = useMemo(() => Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), [])
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(filteredStatuses)
+
+  const [groupBy, setGroupBy] = useState<GroupBy>('scenario')
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('today')
+
+  useEffect(() => {
+    if (!company) return
+    fetchConfig()
+    fetchBilling()
+    fetchCosts()
+    fetchNumbers()
+  }, [company])
+
+  useEffect(() => {
+    if (!company) return
+    fetchStats()
+  }, [company, groupBy, timeFilter])
+
+  useEffect(() => {
+    if (!company) return
+    fetchTrend(trendMode)
+  }, [company, trendMode])
 
   const fetchConfig = async () => {
-    setLoadingConfig(true)
-    const { data } = await client.get<ScheduleConfig>('/api/schedule')
-    setConfig(data)
-    setLoadingConfig(false)
+    if (!company) return
+    try {
+      const { data } = await client.get<ScheduleConfig>(`/api/${company.name}/schedule`)
+      setConfig(data)
+    } catch (error) {
+      console.error('Failed to fetch config', error)
+    }
+  }
+
+  const fetchBilling = async () => {
+    if (!company) return
+    try {
+      const { data } = await client.get<BillingInfo>(`/api/${company.name}/billing`)
+      setBilling(data)
+    } catch (error) {
+      console.error('Failed to fetch billing', error)
+    }
+  }
+
+  const fetchCosts = async () => {
+    if (!company) return
+    try {
+      const { data } = await client.get<CostSummary>('/api/stats/costs', {
+        params: { company: company.name }
+      })
+      setCosts(data)
+    } catch (error) {
+      console.error('Failed to fetch costs', error)
+    }
   }
 
   const fetchNumbers = async () => {
-    const { data } = await client.get<NumbersSummary>('/api/stats/numbers-summary')
-    setNumbersSummary(data)
-  }
-
-  const fetchAttemptSummary = async (mode: typeof attemptMode) => {
-    const params: Record<string, number | string> = {}
-    if (mode === 'today') params.days = 1
-    if (mode === '1h') params.hours = 1
-    if (mode === '7d') params.days = 7
-    if (mode === '30d') params.days = 30
-    const { data } = await client.get<AttemptSummary>('/api/stats/attempts-summary', { params })
-    setAttemptSummary(data)
+    try {
+      const { data } = await client.get<NumbersSummary>('/api/stats/numbers-summary')
+      setNumbersSummary(data)
+    } catch (error) {
+      console.error('Failed to fetch numbers', error)
+    }
   }
 
   const fetchTrend = async (mode: typeof trendMode) => {
     const params: Record<string, number | string> = {}
-    if (mode === 'hour24') {
-      params.granularity = 'hour'
-      params.span = 24
-    } else if (mode === 'day7') {
-      params.granularity = 'day'
-      params.span = 7
-    } else if (mode === 'day30') {
-      params.granularity = 'day'
-      params.span = 30
-    } else if (mode === 'day180') {
-      params.granularity = 'day'
-      params.span = 180
+    if (mode === 'hour6') { params.granularity = 'hour'; params.span = 6 }
+    else if (mode === 'hour24') { params.granularity = 'hour'; params.span = 24 }
+    else if (mode === 'day7') { params.granularity = 'day'; params.span = 7 }
+    else if (mode === 'day30') { params.granularity = 'day'; params.span = 30 }
+    try {
+      const { data } = await client.get<AttemptTrendResponse>('/api/stats/attempt-trend', { params })
+      setTrend(data)
+    } catch (error) {
+      console.error('Failed to fetch trend', error)
     }
-    const { data } = await client.get<AttemptTrendResponse>('/api/stats/attempt-trend', { params })
-    setTrend(data)
   }
 
-  const fetchBilling = async () => {
-    const { data } = await client.get<BillingInfo>('/api/billing')
-    setBilling(data)
+  const fetchStats = async () => {
+    if (!company) return
+    setLoading(true)
+    try {
+      const { data } = await client.get<DashboardStats>('/api/stats/dashboard-stats', {
+        params: {
+          company: company.name,
+          group_by: groupBy,
+          time_filter: timeFilter
+        }
+      })
+      setStats(data)
+    } catch (error) {
+      console.error('Failed to fetch stats', error)
+    } finally {
+      setLoading(false)
+    }
   }
-
-  const fetchCosts = async () => {
-    const { data } = await client.get<CostSummary>('/api/stats/costs')
-    setCosts(data)
-  }
-
-  useEffect(() => {
-    fetchConfig()
-    fetchNumbers()
-    fetchTrend(trendMode)
-    fetchBilling()
-    fetchCosts()
-  }, [])
-
-  useEffect(() => {
-    fetchAttemptSummary(attemptMode)
-  }, [attemptMode])
-
-  useEffect(() => {
-    fetchTrend(trendMode)
-  }, [trendMode])
 
   const toggleDialer = async () => {
-    if (!config) return
+    if (!config || !company) return
     setSaving(true)
     try {
-      const { data } = await client.put('/api/schedule', { enabled: !config.enabled })
+      const { data } = await client.put(`/api/${company.name}/schedule`, {
+        enabled: !config.enabled
+      })
       setConfig((prev) => (prev ? { ...prev, enabled: data.enabled } : data))
+    } catch (error) {
+      console.error('Failed to toggle dialer', error)
     } finally {
       setSaving(false)
     }
   }
 
-  const statusBadge = (on: boolean) => (
-    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${on ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-      {on ? 'فعال' : 'غیرفعال'}
-    </span>
-  )
-
-  const attemptedCount = useMemo(() => attemptSummary?.total_attempts ?? null, [attemptSummary])
-
-  const inQueueCount = useMemo(() => {
-    if (!numbersSummary) return null
-    return numbersSummary.status_counts.find((s) => s.status === 'IN_QUEUE')?.count ?? 0
-  }, [numbersSummary])
-
-  const attemptedStatusCounts = useMemo(() => {
-    if (!attemptSummary) return null
-    const attemptTotal = attemptSummary.total_attempts
-    const filtered = attemptSummary.status_counts.filter((s) => s.status !== 'IN_QUEUE')
-    return filtered.map((s) => ({
-      ...s,
-      percentage: attemptTotal > 0 ? (s.count / attemptTotal) * 100 : 0,
-    }))
-  }, [attemptSummary])
-
-  const pieData = useMemo(() => {
-    if (!attemptedStatusCounts) return null
-    const sorted = [...attemptedStatusCounts].sort((a, b) => (a.status > b.status ? 1 : -1))
-    return {
-      labels: sorted.map((s) => statusLabels[s.status] || s.status),
-      datasets: [
-        {
-          data: sorted.map((s) => Number(s.percentage.toFixed(2))),
-          backgroundColor: sorted.map((s) => statusColors[s.status] || '#94a3b8'),
-          borderWidth: 1,
-        },
-      ],
-    }
-  }, [attemptedStatusCounts])
+  const inQueueCount = numbersSummary?.status_counts.find((s) => s.status === 'IN_QUEUE')?.count ?? 0
 
   const lineData = useMemo(() => {
     if (!trend) return null
@@ -241,12 +234,6 @@ const DashboardPage = () => {
         label: statusLabels[status] || status,
         statusKey: status,
         data: trend.buckets.map((bucket) => {
-          if (status === 'CONNECTED_CALLS') {
-            const counts = bucket.status_counts.filter((s) => connectedStatuses.includes(s.status))
-            const total = bucket.total_attempts || 1
-            const sumCount = counts.reduce((acc, cur) => acc + cur.count, 0)
-            return Number(((sumCount / total) * 100 || 0).toFixed(2))
-          }
           const match = bucket.status_counts.find((s) => s.status === status)
           return match ? Number(match.percentage.toFixed(2)) : 0
         }),
@@ -266,164 +253,255 @@ const DashboardPage = () => {
     )
   }
 
-  const attemptModeLabel =
-    attemptMode === 'today'
-      ? 'امروز'
-      : attemptMode === '1h'
-        ? '۱ ساعت گذشته'
-        : attemptMode === '7d'
-          ? '۷ روز گذشته'
-          : attemptMode === '30d'
-            ? '۳۰ روز گذشته'
-            : 'کل'
-
   const trendModeLabel =
-    trendMode === 'hour24'
-      ? '۲۴ ساعت گذشته'
-      : trendMode === 'day7'
-        ? '۷ روز گذشته'
-        : trendMode === 'day30'
-          ? '۳۰ روز گذشته'
-          : '۶ ماه گذشته'
+    trendMode === 'hour6' ? '۶ ساعت گذشته'
+      : trendMode === 'hour24' ? '۲۴ ساعت گذشته'
+        : trendMode === 'day7' ? '۷ روز گذشته'
+          : '۳۰ روز گذشته'
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 flex flex-col gap-3 md:col-span-3 lg:col-span-1">
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-slate-500">مرکز تماس</div>
-            {statusBadge(!!config?.enabled)}
+      {/* Section 1: Full-width control bar */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Wallet Balance Card */}
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+          <h3 className="text-sm text-slate-500 mb-2">موجودی کیف پول</h3>
+          <div className="text-2xl font-bold text-slate-900">
+            {billing ? billing.wallet_balance.toLocaleString() : '-'} تومان
           </div>
-          <div className="text-sm text-slate-700">
-            کنترل روشن/خاموش بودن سرور مرکز تماس. در صورت خاموش بودن هیچ شماره‌ای ارسال نمی‌شود.
+          <div className="text-xs text-slate-500 mt-1">
+            هزینه هر تماس: {billing ? billing.cost_per_connected.toLocaleString() : '-'} تومان
           </div>
           {billing && billing.wallet_balance <= 0 && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
-              موجودی کیف پول صفر است؛ لطفا کیف پول را شارژ کنید. سیستم روشن نخواهد شد تا شارژ شود.
+            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1 mt-2">
+              موجودی کیف پول صفر است
             </div>
           )}
-          {!config?.enabled && config?.disabled_by_dialer && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">
-              سیستم با خطا مواجه شد (خاموش توسط مرکز تماس/کمبود موجودی)
-            </div>
-          )}
-          <button
-            className="rounded bg-brand-500 text-white px-4 py-2 text-sm disabled:opacity-50"
-            onClick={toggleDialer}
-            disabled={saving || loadingConfig || (billing && billing.wallet_balance <= 0)}
-          >
-            {saving ? 'در حال اعمال...' : config?.enabled ? 'خاموش کردن' : 'روشن کردن'}
-          </button>
-          <div className="text-xs text-slate-500">نسخه زمان‌بندی: {config?.version ?? '-'}</div>
-          <div className="text-sm text-slate-700 space-y-1">
-            <div>موجودی کیف پول: <span className="font-semibold">{billing ? billing.wallet_balance.toLocaleString() : '-'}</span> {billing?.currency || 'تومان'}</div>
-            <div>هزینه هر تماس برقرار شده: <span className="font-semibold">{billing ? billing.cost_per_connected.toLocaleString() : '-'}</span> {billing?.currency || 'تومان'}</div>
-            <div className="text-xs text-slate-500">در صورت صفر شدن موجودی، سیستم خودکار خاموش می‌شود.</div>
+        </div>
+
+        {/* Today's Cost Card */}
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+          <h3 className="text-sm text-slate-500 mb-2">هزینه امروز</h3>
+          <div className="text-2xl font-bold text-slate-900">
+            {costs ? costs.daily_cost.toLocaleString() : '-'} تومان
           </div>
-          <div className="text-sm text-slate-700 space-y-1">
-            <div>هزینه امروز: <span className="font-semibold">{costs ? costs.daily_cost.toLocaleString() : '-'}</span> {costs?.currency || 'تومان'} ({costs ? costs.daily_count : '-' } تماس برقرار)</div>
-            <div>هزینه ماه جاری: <span className="font-semibold">{costs ? costs.monthly_cost.toLocaleString() : '-'}</span> {costs?.currency || 'تومان'} ({costs ? costs.monthly_count : '-' } تماس برقرار)</div>
+          <div className="text-xs text-slate-500 mt-1">
+            {costs ? costs.daily_count : '-'} تماس برقرار شده
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 md:col-span-3 lg:col-span-2">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="font-semibold">نمای کلی شماره‌ها</h3>
-              <p className="text-sm text-slate-500">توذیع وضعیت‌ها (بر اساس تماس‌های گرفته‌شده)</p>
-            </div>
+        {/* Dialing Toggle Card */}
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+          <h3 className="text-sm text-slate-500 mb-2">وضعیت سیستم</h3>
+          <div className="flex items-center gap-4 mt-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={config?.enabled ?? false}
+              disabled={saving || !!(billing && billing.wallet_balance <= 0)}
+              onClick={toggleDialer}
+              dir="ltr"
+              className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:opacity-50 disabled:cursor-not-allowed ${
+                config?.enabled ? 'bg-emerald-500' : 'bg-slate-200'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                  config?.enabled ? 'translate-x-7' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <span className={`text-sm font-semibold ${config?.enabled ? 'text-emerald-600' : 'text-red-600'}`}>
+              {config?.enabled ? 'روشن' : 'خاموش'}
+            </span>
           </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              {attemptedStatusCounts ? (
-                attemptedStatusCounts.map((s) => (
-                  <div key={s.status} className="flex items-center justify-between border border-slate-100 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: statusColors[s.status] || '#cbd5e1' }}></span>
-                      <span className="text-sm text-slate-700">{statusLabels[s.status] || s.status}</span>
-                    </div>
-                    <div className="text-sm font-semibold text-slate-800">
-                      {s.count}{' '}
-                      <span className="text-xs text-slate-500">({s.percentage.toFixed(1)}%)</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-slate-500">در حال بارگذاری...</div>
-              )}
-              <div className="border border-slate-100 rounded-lg px-3 py-3 bg-slate-50">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-col text-sm text-slate-700 space-y-1">
-                    <div>مجموع: <span className="font-semibold">{numbersSummary?.total_numbers ?? '-'}</span></div>
-                    <div>تماس‌های انجام‌شده ({attemptModeLabel}): <span className="font-semibold">{attemptedCount ?? '-'}</span></div>
-                    <div>تماس‌های برقرار شده: <span className="font-semibold">{attemptSummary?.connected_count ?? '-'}</span> <span className="text-xs text-slate-500">({(attemptSummary?.connected_percentage ?? 0).toFixed(1)}%)</span></div>
-                    <div>در صف: <span className="font-semibold">{inQueueCount ?? '-'}</span></div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1 bg-white border border-slate-200 rounded-full px-2 py-1 text-xs">
-                    {[
-                      { key: 'all', label: 'کل' },
-                      { key: 'today', label: 'امروز' },
-                      { key: '1h', label: '۱س' },
-                      { key: '7d', label: '۷روز' },
-                      { key: '30d', label: '۳۰روز' },
-                    ].map((item) => (
-                      <button
-                        key={item.key}
-                        className={`px-2 py-1 rounded-full text-xs ${attemptMode === item.key ? 'bg-brand-500 text-white' : 'text-slate-700'}`}
-                        onClick={() => setAttemptMode(item.key as typeof attemptMode)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+          {!config?.enabled && config?.disabled_by_dialer && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1 mt-2">
+              خاموش شده توسط سیستم
             </div>
-            <div className="flex items-center justify-center">
-              {pieData ? (
-                <Pie
-                  data={pieData}
-                  options={{
-                    plugins: {
-                      legend: { position: 'bottom' },
-                      tooltip: {
-                        callbacks: {
-                          label: (ctx) => {
-                            const label = ctx.label || ''
-                            const value = ctx.parsed
-                            const count = attemptedStatusCounts?.[ctx.dataIndex]?.count ?? 0
-                            return `${label}: ${value}% (${count})`
-                          },
-                        },
-                      },
-                    },
-                  }}
-                />
-              ) : (
-                <div className="text-sm text-slate-500">داده‌ای برای نمایش نیست.</div>
-              )}
-            </div>
+          )}
+          <div className="text-xs text-slate-500 mt-2">
+            نسخه: {config?.version ?? '-'}
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-4 border border-slate-100 space-y-4">
+      {/* Section 2: Statistics Table */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+          {/* Group By Toggle */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-slate-700">گروه‌بندی:</span>
+            <div className="flex gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={groupBy === 'scenario'}
+                  onChange={() => setGroupBy('scenario')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">بر اساس سناریو</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={groupBy === 'line'}
+                  onChange={() => setGroupBy('line')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">بر اساس خط</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Time Filter */}
+          <div className="flex gap-2">
+            {[
+              { key: '1h', label: 'ساعت گذشته' },
+              { key: 'today', label: 'امروز' },
+              { key: 'yesterday', label: 'دیروز' },
+              { key: '7d', label: '7 روز' },
+              { key: '30d', label: '30 روز' },
+            ].map((item) => (
+              <button
+                key={item.key}
+                className={`px-3 py-1 rounded text-sm ${
+                  timeFilter === item.key
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                onClick={() => setTimeFilter(item.key as TimeFilter)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Stats Table */}
+        {loading ? (
+          <div className="text-center py-8 text-slate-500">در حال بارگذاری...</div>
+        ) : stats ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-slate-50">
+                  <th className="border border-slate-200 px-3 py-2 text-right font-semibold">
+                    {groupBy === 'scenario' ? 'سناریو' : 'خط'}
+                  </th>
+                  {Object.entries(statusLabels)
+                    .filter(([key]) => key !== 'IN_QUEUE')
+                    .map(([key, label]) => (
+                      <th key={key} className="border border-slate-200 px-3 py-2 text-center font-semibold">
+                        {label}
+                      </th>
+                    ))}
+                  <th className="border border-slate-200 px-3 py-2 text-center font-semibold bg-slate-100">
+                    مجموع
+                  </th>
+                  <th className="border border-slate-200 px-3 py-2 text-center font-semibold bg-blue-50">
+                    قابل صدور هزینه
+                  </th>
+                  <th className="border border-slate-200 px-3 py-2 text-center font-semibold bg-green-50">
+                    تماس ورودی
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.groups.map((group) => (
+                  <tr key={group.id} className="hover:bg-slate-50">
+                    <td className="border border-slate-200 px-3 py-2 font-medium">
+                      {group.display_name || group.name}
+                    </td>
+                    {Object.keys(statusLabels)
+                      .filter((key) => key !== 'IN_QUEUE')
+                      .map((status) => {
+                        const count = group.statuses[status] || 0
+                        const percentage = group.total > 0 ? ((count / group.total) * 100).toFixed(1) : '0.0'
+                        return (
+                          <td key={status} className="border border-slate-200 px-3 py-2 text-center">
+                            {count > 0 ? (
+                              <>
+                                {count.toLocaleString()}
+                                <span className="text-xs text-slate-500 mr-1">({percentage}%)</span>
+                              </>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                        )
+                      })}
+                    <td className="border border-slate-200 px-3 py-2 text-center font-semibold bg-slate-50">
+                      {group.total.toLocaleString()}
+                    </td>
+                    <td className="border border-slate-200 px-3 py-2 text-center font-semibold bg-blue-50">
+                      {group.billable.toLocaleString()}
+                    </td>
+                    <td className="border border-slate-200 px-3 py-2 text-center font-semibold bg-green-50">
+                      {group.inbound.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-100 font-semibold">
+                  <td className="border border-slate-200 px-3 py-2">مجموع کل</td>
+                  {Object.keys(statusLabels)
+                    .filter((key) => key !== 'IN_QUEUE')
+                    .map((status) => (
+                      <td key={status} className="border border-slate-200 px-3 py-2 text-center">
+                        {(stats.totals[status] || 0).toLocaleString()}
+                      </td>
+                    ))}
+                  <td className="border border-slate-200 px-3 py-2 text-center bg-slate-200">
+                    {stats.totals.total.toLocaleString()}
+                  </td>
+                  <td className="border border-slate-200 px-3 py-2 text-center bg-blue-100">
+                    {stats.totals.billable.toLocaleString()}
+                  </td>
+                  <td className="border border-slate-200 px-3 py-2 text-center bg-green-100">
+                    {stats.totals.inbound.toLocaleString()}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-slate-500">داده‌ای برای نمایش وجود ندارد</div>
+        )}
+
+        {/* Footer Stats */}
+        <div className="flex items-center justify-between gap-4 mt-6 pt-4 border-t border-slate-200 text-sm text-slate-600">
+          <span>
+            مجموع شماره‌ها: <strong className="text-slate-900">{numbersSummary?.total_numbers.toLocaleString() ?? '-'}</strong>
+          </span>
+          <span>
+            در صف: <strong className="text-slate-900">{inQueueCount.toLocaleString()}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* Section 3: Trend Line Chart */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="font-semibold">روند درصد وضعیت تماس‌ها</h3>
-            <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت در تماس‌های هر بازه ({trendModeLabel}، بدون در صف)</p>
+            <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت ({trendModeLabel})</p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm items-center">
-            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-full px-2 py-1 text-xs">
+            <div className="flex items-center gap-1 bg-slate-100 rounded-full px-2 py-1 text-xs">
               {[
+                { key: 'hour6', label: '۶س' },
                 { key: 'hour24', label: '۲۴س' },
                 { key: 'day7', label: '۷روز' },
                 { key: 'day30', label: '۳۰روز' },
-                { key: 'day180', label: '۶ماه' },
               ].map((item) => (
                 <button
                   key={item.key}
-                  className={`px-2 py-1 rounded-full text-xs ${trendMode === item.key ? 'bg-brand-500 text-white' : 'text-slate-700'}`}
+                  className={`px-2 py-1 rounded-full text-xs transition-colors ${
+                    trendMode === item.key ? 'bg-blue-500 text-white' : 'text-slate-700 hover:bg-slate-200'
+                  }`}
                   onClick={() => setTrendMode(item.key as typeof trendMode)}
                 >
                   {item.label}
@@ -433,11 +511,12 @@ const DashboardPage = () => {
             {Object.entries(statusLabels)
               .filter(([key]) => key !== 'IN_QUEUE')
               .map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 border border-slate-200 rounded-full px-3 py-1">
+                <label key={key} className="flex items-center gap-2 border border-slate-200 rounded-full px-3 py-1 cursor-pointer hover:bg-slate-50">
                   <input
                     type="checkbox"
                     checked={selectedStatuses.includes(key)}
                     onChange={() => toggleStatusFilter(key)}
+                    className="w-3 h-3"
                   />
                   <span className="flex items-center gap-1">
                     <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: statusColors[key] || '#cbd5e1' }}></span>
@@ -460,28 +539,22 @@ const DashboardPage = () => {
                       title: (items) => {
                         if (!items.length) return ''
                         const idx = items[0].dataIndex
-                    const bucket = trend?.buckets[idx]
-                    if (!bucket) return ''
-                    return trend?.granularity === 'hour'
-                      ? dayjs(bucket.bucket).calendar('jalali').format('YYYY/MM/DD HH:mm')
-                      : dayjs(bucket.bucket).calendar('jalali').format('YYYY/MM/DD')
-                    },
-                    label: (ctx) => {
+                        const bucket = trend?.buckets[idx]
+                        if (!bucket) return ''
+                        return trend?.granularity === 'hour'
+                          ? dayjs(bucket.bucket).calendar('jalali').format('YYYY/MM/DD HH:mm')
+                          : dayjs(bucket.bucket).calendar('jalali').format('YYYY/MM/DD')
+                      },
+                      label: (ctx) => {
                         const bucket = trend?.buckets[ctx.dataIndex]
                         const statusKey = (ctx.dataset as any).statusKey as string | undefined
-                        if (statusKey === 'CONNECTED_CALLS' && bucket) {
-                          const counts = bucket.status_counts.filter((s) => connectedStatuses.includes(s.status))
-                          const sumCount = counts.reduce((acc, cur) => acc + cur.count, 0)
-                          const total = bucket.total_attempts ?? 0
-                          return `${ctx.dataset.label}: ${ctx.parsed.y}% (${sumCount}/${total})`
-                        }
                         const match = statusKey ? bucket?.status_counts.find((s) => s.status === statusKey) : undefined
                         const count = match?.count ?? 0
                         const total = bucket?.total_attempts ?? 0
                         return `${ctx.dataset.label}: ${ctx.parsed.y}% (${count}/${total})`
+                      },
                     },
                   },
-                },
                 },
                 scales: {
                   y: {
@@ -494,7 +567,7 @@ const DashboardPage = () => {
               }}
             />
           ) : (
-            <div className="text-sm text-slate-500">داده‌ای برای نمایش نیست.</div>
+            <div className="text-sm text-slate-500 text-center py-8">داده‌ای برای نمایش نیست.</div>
           )}
         </div>
       </div>

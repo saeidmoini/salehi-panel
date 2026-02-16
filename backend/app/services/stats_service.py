@@ -6,11 +6,26 @@ from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
 from ..models.phone_number import PhoneNumber, CallStatus
-from ..models.call_attempt import CallAttempt
+from ..models.call_result import CallResult
+from ..models.scenario import Scenario
+from ..models.outbound_line import OutboundLine
+from ..models.company import Company
 from ..schemas.stats import NumbersSummary, StatusShare, AttemptTrendResponse, TimeBucketBreakdown, AttemptSummary
 from .schedule_service import TEHRAN_TZ, ensure_config
 
 settings = get_settings()
+
+# Billable statuses (charges wallet)
+BILLABLE_STATUSES = {
+    CallStatus.CONNECTED,
+    CallStatus.NOT_INTERESTED,
+    CallStatus.HANGUP,
+    CallStatus.UNKNOWN,
+    CallStatus.DISCONNECTED,
+    CallStatus.FAILED,
+}
+
+# Legacy connected statuses (for backward compatibility)
 CONNECTED_STATUSES = {
     CallStatus.DISCONNECTED,
     CallStatus.CONNECTED,
@@ -56,10 +71,10 @@ def attempt_summary(db: Session, days: int | None = None, hours: int | None = No
         start_tehran = _tehran_start_of_day(days - 1)
         start_utc = start_tehran.astimezone(timezone.utc)
 
-    query = db.query(CallAttempt.status, func.count(CallAttempt.id))
+    query = db.query(CallResult.status, func.count(CallResult.id))
     if start_utc:
-        query = query.filter(CallAttempt.attempted_at >= start_utc)
-    rows = query.group_by(CallAttempt.status).all()
+        query = query.filter(CallResult.attempted_at >= start_utc)
+    rows = query.group_by(CallResult.status).all()
     total = sum(count for _, count in rows)
     status_shares: list[StatusShare] = []
     for status, count in rows:
@@ -105,7 +120,7 @@ def attempt_trend(db: Session, span: int = 14, granularity: str = "day") -> Atte
 
     start_utc = start_tehran.astimezone(timezone.utc)
 
-    attempts = db.query(CallAttempt).filter(CallAttempt.attempted_at >= start_utc).all()
+    attempts = db.query(CallResult).filter(CallResult.attempted_at >= start_utc).all()
 
     # Bucket attempts by Tehran-local bucket and status
     buckets: dict[datetime, dict[CallStatus, int]] = defaultdict(lambda: defaultdict(int))
@@ -152,24 +167,31 @@ def attempt_trend(db: Session, span: int = 14, granularity: str = "day") -> Atte
     return AttemptTrendResponse(granularity=granularity, buckets=bucket_list)
 
 
-def cost_summary(db: Session) -> dict:
-    cfg = ensure_config(db)
-    rate = cfg.cost_per_connected or 0
+def cost_summary(db: Session, company_id: int) -> dict:
+    # Get company billing config from settings
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company or not company.settings:
+        rate = 0
+    else:
+        rate = company.settings.get("cost_per_connected", 0)
+
     now_tehran = datetime.now(TEHRAN_TZ)
     start_of_day = datetime.combine(now_tehran.date(), time(0, 0), tzinfo=TEHRAN_TZ).astimezone(timezone.utc)
     start_of_month = datetime.combine(now_tehran.date().replace(day=1), time(0, 0), tzinfo=TEHRAN_TZ).astimezone(timezone.utc)
 
     daily_count = (
-        db.query(func.count(CallAttempt.id))
-        .filter(CallAttempt.status.in_([status.value for status in CONNECTED_STATUSES]))
-        .filter(CallAttempt.attempted_at >= start_of_day)
+        db.query(func.count(CallResult.id))
+        .filter(CallResult.company_id == company_id)
+        .filter(CallResult.status.in_([status.value for status in CONNECTED_STATUSES]))
+        .filter(CallResult.attempted_at >= start_of_day)
         .scalar()
         or 0
     )
     monthly_count = (
-        db.query(func.count(CallAttempt.id))
-        .filter(CallAttempt.status.in_([status.value for status in CONNECTED_STATUSES]))
-        .filter(CallAttempt.attempted_at >= start_of_month)
+        db.query(func.count(CallResult.id))
+        .filter(CallResult.company_id == company_id)
+        .filter(CallResult.status.in_([status.value for status in CONNECTED_STATUSES]))
+        .filter(CallResult.attempted_at >= start_of_month)
         .scalar()
         or 0
     )
@@ -180,4 +202,158 @@ def cost_summary(db: Session) -> dict:
         "daily_cost": daily_count * rate,
         "monthly_count": monthly_count,
         "monthly_cost": monthly_count * rate,
+    }
+
+
+def _resolve_time_filter(time_filter: str) -> datetime | None:
+    """Resolve time filter string to UTC datetime"""
+    now_tehran = datetime.now(TEHRAN_TZ)
+
+    if time_filter == "1h":
+        start_tehran = now_tehran - timedelta(hours=1)
+        return start_tehran.astimezone(timezone.utc)
+    elif time_filter == "today":
+        start_tehran = datetime.combine(now_tehran.date(), time(0, 0), tzinfo=TEHRAN_TZ)
+        return start_tehran.astimezone(timezone.utc)
+    elif time_filter == "yesterday":
+        yesterday = now_tehran.date() - timedelta(days=1)
+        start_tehran = datetime.combine(yesterday, time(0, 0), tzinfo=TEHRAN_TZ)
+        end_tehran = datetime.combine(yesterday, time(23, 59, 59), tzinfo=TEHRAN_TZ)
+        return start_tehran.astimezone(timezone.utc)
+    elif time_filter == "7d":
+        start_tehran = _tehran_start_of_day(6)
+        return start_tehran.astimezone(timezone.utc)
+    elif time_filter == "30d":
+        start_tehran = _tehran_start_of_day(29)
+        return start_tehran.astimezone(timezone.utc)
+
+    return None
+
+
+def dashboard_stats(
+    db: Session,
+    company_id: int,
+    group_by: str = "scenario",
+    time_filter: str = "today",
+) -> dict:
+    """
+    Returns call status counts grouped by scenario or outbound line.
+    Includes row totals, billable column, and inbound column.
+
+    Args:
+        db: Database session
+        company_id: Company ID to filter by
+        group_by: "scenario" or "line"
+        time_filter: "1h", "today", "yesterday", "7d", "30d"
+
+    Returns:
+        {
+            "groups": [
+                {
+                    "id": int,
+                    "name": str,
+                    "statuses": {"CONNECTED": 10, "MISSED": 5, ...},
+                    "total": int,
+                    "billable": int,
+                    "inbound": int
+                }
+            ],
+            "totals": {
+                "CONNECTED": int,
+                "MISSED": int,
+                ...,
+                "total": int,
+                "billable": int,
+                "inbound": int
+            }
+        }
+    """
+    start_utc = _resolve_time_filter(time_filter)
+
+    # Determine grouping column and label model
+    if group_by == "scenario":
+        group_col = CallResult.scenario_id
+        label_model = Scenario
+    else:
+        group_col = CallResult.outbound_line_id
+        label_model = OutboundLine
+
+    # Query call results grouped by scenario/line and status
+    query = (
+        db.query(
+            group_col.label("group_id"),
+            CallResult.status,
+            func.count(CallResult.id).label("count")
+        )
+        .filter(CallResult.company_id == company_id)
+    )
+
+    if start_utc:
+        query = query.filter(CallResult.attempted_at >= start_utc)
+
+    rows = query.group_by(group_col, CallResult.status).all()
+
+    # Build matrix
+    groups_dict = defaultdict(lambda: defaultdict(int))
+    for group_id, status, count in rows:
+        if group_id is not None:
+            groups_dict[group_id][status] = count
+
+    # Fetch group names
+    group_names = {}
+    if group_by == "scenario":
+        scenarios = db.query(Scenario).filter(Scenario.company_id == company_id).all()
+        for s in scenarios:
+            group_names[s.id] = s.display_name
+    else:
+        lines = db.query(OutboundLine).filter(OutboundLine.company_id == company_id).all()
+        for line in lines:
+            group_names[line.id] = line.display_name
+
+    # Build response with all statuses
+    all_statuses = [status.value for status in CallStatus]
+    groups = []
+    totals = {status: 0 for status in all_statuses}
+    totals["total"] = 0
+    totals["billable"] = 0
+    totals["inbound"] = 0
+
+    for group_id, status_counts in groups_dict.items():
+        group_data = {
+            "id": group_id,
+            "name": group_names.get(group_id, f"Unknown {group_by} {group_id}"),
+            "statuses": {status: 0 for status in all_statuses},
+            "total": 0,
+            "billable": 0,
+            "inbound": 0,
+        }
+
+        for status, count in status_counts.items():
+            group_data["statuses"][status] = count
+            group_data["total"] += count
+            totals[status] += count
+            totals["total"] += count
+
+            # Count billable
+            try:
+                status_enum = CallStatus(status)
+                if status_enum in BILLABLE_STATUSES:
+                    group_data["billable"] += count
+                    totals["billable"] += count
+
+                # Count inbound
+                if status_enum == CallStatus.INBOUND_CALL:
+                    group_data["inbound"] += count
+                    totals["inbound"] += count
+            except ValueError:
+                pass
+
+        groups.append(group_data)
+
+    # Sort groups by name
+    groups.sort(key=lambda g: g["name"])
+
+    return {
+        "groups": groups,
+        "totals": totals,
     }
