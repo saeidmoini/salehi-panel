@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 
@@ -24,3 +24,16 @@ class OutboundLineOut(OutboundLineBase):
 
     class Config:
         from_attributes = True
+
+
+class RegisterOutboundLineItem(BaseModel):
+    """Minimal outbound line shape accepted from dialer startup registration."""
+    model_config = ConfigDict(extra="forbid")
+    phone_number: str = Field(..., min_length=1, max_length=32)
+    display_name: str = Field(..., min_length=1, max_length=255)
+
+
+class RegisterOutboundLinesRequest(BaseModel):
+    """Request from dialer app to register available outbound lines."""
+    company: str
+    outbound_lines: list[RegisterOutboundLineItem]

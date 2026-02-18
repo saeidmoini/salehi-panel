@@ -54,6 +54,8 @@ def create_admin_user(db: Session, data: AdminUserCreate) -> AdminUser:
         first_name=data.first_name,
         last_name=data.last_name,
         phone_number=normalized_phone,
+        company_id=data.company_id,
+        agent_type=data.agent_type,
     )
     db.add(user)
     db.commit()
@@ -122,6 +124,10 @@ def update_admin_user(db: Session, user_id: int, data: AdminUserUpdate) -> Admin
         if existing_phone:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already in use")
         user.phone_number = normalized_phone
+    if data.company_id is not None:
+        user.company_id = data.company_id
+    if data.agent_type is not None:
+        user.agent_type = data.agent_type
     db.commit()
     db.refresh(user)
     return user

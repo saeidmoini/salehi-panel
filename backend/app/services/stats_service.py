@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, time, timedelta, date, timezone
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
@@ -36,27 +36,48 @@ CONNECTED_STATUSES = {
 }
 
 
-def numbers_summary(db: Session) -> NumbersSummary:
+def numbers_summary(db: Session, company_id: int | None = None) -> NumbersSummary:
     total = db.query(func.count(PhoneNumber.id)).scalar() or 0
-    rows = (
-        db.query(PhoneNumber.status, func.count(PhoneNumber.id))
-        .group_by(PhoneNumber.status)
-        .all()
-    )
-    status_shares: list[StatusShare] = []
-    for status, count in rows:
-        status_shares.append(
-            StatusShare(
-                status=status,
-                count=count,
-                percentage=(count / total * 100) if total else 0.0,
+
+    status_counts: dict[str, int] = {status.value: 0 for status in CallStatus}
+
+    if company_id is not None:
+        # Latest call result per number for this company using window function
+        from sqlalchemy import over
+        inner = (
+            db.query(
+                CallResult.phone_number_id,
+                CallResult.status,
+                func.row_number().over(
+                    partition_by=CallResult.phone_number_id,
+                    order_by=CallResult.attempted_at.desc(),
+                ).label("rn"),
             )
+            .filter(CallResult.company_id == company_id)
+            .subquery()
         )
-    # include zero-count statuses for completeness
-    existing_statuses = {s.status for s in status_shares}
+        rows = (
+            db.query(inner.c.status, func.count(inner.c.phone_number_id))
+            .filter(inner.c.rn == 1)
+            .group_by(inner.c.status)
+            .all()
+        )
+        called_total = 0
+        for status_val, count in rows:
+            if status_val in status_counts:
+                status_counts[status_val] = count
+                called_total += count
+        # IN_QUEUE = total numbers minus those with any call record for this company
+        status_counts[CallStatus.IN_QUEUE.value] = total - called_total
+
+    status_shares: list[StatusShare] = []
     for status in CallStatus:
-        if status not in existing_statuses:
-            status_shares.append(StatusShare(status=status, count=0, percentage=0.0))
+        count = status_counts[status.value]
+        status_shares.append(StatusShare(
+            status=status,
+            count=count,
+            percentage=(count / total * 100) if total else 0.0,
+        ))
     status_shares.sort(key=lambda s: s.status.value)
     return NumbersSummary(total_numbers=total, status_counts=status_shares)
 
@@ -110,8 +131,9 @@ def _tehran_start_of_day(days_back: int) -> datetime:
     return datetime.combine(start_date, time(0, 0), tzinfo=TEHRAN_TZ)
 
 
-def attempt_trend(db: Session, span: int = 14, granularity: str = "day") -> AttemptTrendResponse:
+def attempt_trend(db: Session, span: int = 14, granularity: str = "day", company_id: int | None = None) -> AttemptTrendResponse:
     granularity = granularity if granularity in {"day", "hour"} else "day"
+    tz_name = str(TEHRAN_TZ)
     now_tehran = datetime.now(TEHRAN_TZ)
     if granularity == "hour":
         start_tehran = now_tehran.replace(minute=0, second=0, microsecond=0) - timedelta(hours=span - 1)
@@ -120,21 +142,35 @@ def attempt_trend(db: Session, span: int = 14, granularity: str = "day") -> Atte
 
     start_utc = start_tehran.astimezone(timezone.utc)
 
-    attempts = db.query(CallResult).filter(CallResult.attempted_at >= start_utc).all()
+    # Use SQL-level date_trunc with timezone for fast aggregation
+    bucket_expr = func.date_trunc(
+        granularity,
+        func.timezone(tz_name, CallResult.attempted_at),
+    ).label("bucket")
 
-    # Bucket attempts by Tehran-local bucket and status
+    query = (
+        db.query(
+            bucket_expr,
+            CallResult.status,
+            func.count(CallResult.id).label("cnt"),
+        )
+        .filter(CallResult.attempted_at >= start_utc)
+    )
+
+    if company_id is not None:
+        query = query.filter(CallResult.company_id == company_id)
+
+    rows = query.group_by(bucket_expr, CallResult.status).all()
+
+    # Build bucket dict from SQL results
     buckets: dict[datetime, dict[CallStatus, int]] = defaultdict(lambda: defaultdict(int))
-    for attempt in attempts:
+    for bucket_dt, status_val, cnt in rows:
         try:
-            status = CallStatus(attempt.status)
+            status = CallStatus(status_val)
         except ValueError:
             continue
-        local_dt = attempt.attempted_at.astimezone(TEHRAN_TZ)
-        if granularity == "hour":
-            bucket_start = local_dt.replace(minute=0, second=0, microsecond=0)
-        else:
-            bucket_start = datetime.combine(local_dt.date(), time(0, 0), tzinfo=TEHRAN_TZ)
-        buckets[bucket_start][status] += 1
+        bucket_key = bucket_dt.replace(tzinfo=TEHRAN_TZ)
+        buckets[bucket_key][status] = cnt
 
     # Fill missing buckets with zeros to keep chart continuous
     bucket_list: list[TimeBucketBreakdown] = []
@@ -205,29 +241,29 @@ def cost_summary(db: Session, company_id: int) -> dict:
     }
 
 
-def _resolve_time_filter(time_filter: str) -> datetime | None:
-    """Resolve time filter string to UTC datetime"""
+def _resolve_time_filter(time_filter: str) -> tuple[datetime | None, datetime | None]:
+    """Resolve time filter string to UTC datetime range (start, end)"""
     now_tehran = datetime.now(TEHRAN_TZ)
 
     if time_filter == "1h":
         start_tehran = now_tehran - timedelta(hours=1)
-        return start_tehran.astimezone(timezone.utc)
+        return start_tehran.astimezone(timezone.utc), None
     elif time_filter == "today":
         start_tehran = datetime.combine(now_tehran.date(), time(0, 0), tzinfo=TEHRAN_TZ)
-        return start_tehran.astimezone(timezone.utc)
+        return start_tehran.astimezone(timezone.utc), None
     elif time_filter == "yesterday":
         yesterday = now_tehran.date() - timedelta(days=1)
         start_tehran = datetime.combine(yesterday, time(0, 0), tzinfo=TEHRAN_TZ)
-        end_tehran = datetime.combine(yesterday, time(23, 59, 59), tzinfo=TEHRAN_TZ)
-        return start_tehran.astimezone(timezone.utc)
+        end_tehran = datetime.combine(yesterday, time(23, 59, 59, 999999), tzinfo=TEHRAN_TZ)
+        return start_tehran.astimezone(timezone.utc), end_tehran.astimezone(timezone.utc)
     elif time_filter == "7d":
         start_tehran = _tehran_start_of_day(6)
-        return start_tehran.astimezone(timezone.utc)
+        return start_tehran.astimezone(timezone.utc), None
     elif time_filter == "30d":
         start_tehran = _tehran_start_of_day(29)
-        return start_tehran.astimezone(timezone.utc)
+        return start_tehran.astimezone(timezone.utc), None
 
-    return None
+    return None, None
 
 
 def dashboard_stats(
@@ -268,7 +304,7 @@ def dashboard_stats(
             }
         }
     """
-    start_utc = _resolve_time_filter(time_filter)
+    start_utc, end_utc = _resolve_time_filter(time_filter)
 
     # Determine grouping column and label model
     if group_by == "scenario":
@@ -290,6 +326,8 @@ def dashboard_stats(
 
     if start_utc:
         query = query.filter(CallResult.attempted_at >= start_utc)
+    if end_utc:
+        query = query.filter(CallResult.attempted_at <= end_utc)
 
     rows = query.group_by(group_col, CallResult.status).all()
 

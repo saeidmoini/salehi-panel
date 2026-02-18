@@ -21,7 +21,11 @@ const LoginPage = () => {
       if (me.is_superuser) {
         navigate('/admin/companies')
       } else if (me.company_name) {
-        navigate(`/${me.company_name}/dashboard`)
+        if (me.role === 'AGENT') {
+          navigate(`/${me.company_name}/numbers`)
+        } else {
+          navigate(`/${me.company_name}/dashboard`)
+        }
       } else {
         setError('کاربر به شرکتی اختصاص داده نشده است')
       }

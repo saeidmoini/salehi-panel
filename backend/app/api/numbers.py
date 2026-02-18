@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.security import get_current_active_user
-from ..models.phone_number import CallStatus
+from ..models.phone_number import CallStatus, GlobalStatus
 from ..schemas.phone_number import (
     PhoneNumberCreate,
     PhoneNumberOut,
@@ -25,7 +25,9 @@ router = APIRouter()
 
 @router.get("/", response_model=list[PhoneNumberOut])
 def list_numbers(
+    company: str | None = Query(default=None, description="Company name to filter data"),
     status: CallStatus | None = Query(default=None),
+    global_status: GlobalStatus | None = Query(default=None),
     search: str | None = None,
     start_date: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     end_date: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
@@ -42,7 +44,9 @@ def list_numbers(
     numbers = phone_service.list_numbers(
         db,
         current_user=current_user,
+        company_name=company,
         status=status,
+        global_status=global_status,
         search=search,
         start_date=start,
         end_date=end,
@@ -57,7 +61,9 @@ def list_numbers(
 
 @router.get("/stats", response_model=PhoneNumberStatsResponse)
 def numbers_stats(
+    company: str | None = Query(default=None, description="Company name to filter data"),
     status: CallStatus | None = Query(default=None),
+    global_status: GlobalStatus | None = Query(default=None),
     search: str | None = None,
     start_date: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     end_date: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
@@ -70,7 +76,9 @@ def numbers_stats(
     total = phone_service.count_numbers(
         db,
         current_user=current_user,
+        company_name=company,
         status=status,
+        global_status=global_status,
         search=search,
         agent_id=agent_id,
         start_date=start,
@@ -110,20 +118,36 @@ def upload_numbers(file: UploadFile = File(...), db: Session = Depends(get_db), 
 
 
 @router.put("/{number_id}/status", response_model=PhoneNumberOut)
-def update_status(number_id: int, payload: PhoneNumberStatusUpdate, db: Session = Depends(get_db), current_user=Depends(get_current_active_user)):
-    number = phone_service.update_number_status(db, number_id, payload, current_user=current_user)
+def update_status(
+    number_id: int,
+    payload: PhoneNumberStatusUpdate,
+    company: str | None = Query(default=None, description="Company slug"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    number = phone_service.update_number_status(db, number_id, payload, current_user=current_user, company_name=company)
     return number
 
 
 @router.delete("/{number_id}")
-def delete_number(number_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_active_user)):
-    phone_service.delete_number(db, number_id, current_user=current_user)
+def delete_number(
+    number_id: int,
+    company: str | None = Query(default=None, description="Company slug"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    phone_service.delete_number(db, number_id, current_user=current_user, company_name=company)
     return {"deleted": True, "id": number_id}
 
 
 @router.post("/{number_id}/reset", response_model=PhoneNumberOut)
-def reset_number(number_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_active_user)):
-    number = phone_service.reset_number(db, number_id, current_user=current_user)
+def reset_number(
+    number_id: int,
+    company: str | None = Query(default=None, description="Company slug"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    number = phone_service.reset_number(db, number_id, current_user=current_user, company_name=company)
     return number
 
 

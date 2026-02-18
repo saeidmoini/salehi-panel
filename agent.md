@@ -9,7 +9,7 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 - Schemas: `schemas/*` Pydantic v2 models matching the API.
 - Services: business logic in `services/*` (auth, phone number validation/dedup, schedule evaluation, dialer batch selection and result logging, stats aggregations).
 - API layer: thin routers in `api/*` for auth, admins, schedule, numbers, dialer endpoints, and stats; dependencies in `api/deps.py`.
-- Frontend: Vite React app in `frontend/` with auth context, protected routes, basic pages for dashboard, numbers, schedule, and admin users. Agents only see the Numbers page; add/import is hidden for them. Tailwind config defines a `brand` palette.
+- Frontend: Vite React app in `frontend/` with auth context, protected routes, pages for dashboard, numbers, schedule, admin users, scenarios, outbound lines, profile, and superadmin company management. Agents only see the Numbers page; add/import is hidden for them. Tailwind config defines a `brand` palette.
 
 ## Where to put things
 - New backend routes → `app/api/<area>.py`; schemas in `app/schemas`, logic in `app/services`, DB access in `app/models` (and `repositories` if you add that layer).
@@ -34,6 +34,11 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 - Statuses: `IN_QUEUE`, `MISSED`, `CONNECTED`, `FAILED`, `NOT_INTERESTED`, `HANGUP`, `DISCONNECTED`, plus `BUSY`, `POWER_OFF`, `BANNED`, `UNKNOWN`. UI actions (single/bulk delete/reset/update) only allowed when current status is one of `IN_QUEUE`, `MISSED`, `BUSY`, `POWER_OFF`, `BANNED`; `UNKNOWN` is immutable like a successful call.
 - Bulk admin ops: `/api/numbers/bulk` supports `update_status`, `reset`, `delete` on selected ids or `select_all` with filters (status/search) and optional `excluded_ids`. `/api/numbers/stats` returns total for the current filter (used for select-all across pages). Keep bulk logic in `phone_service.bulk_action`.
 - Excel export: `/api/numbers/export` mirrors bulk selection semantics (ids or select_all + filters/exclusions) and returns XLSX with phone, status, attempts, timestamps, assigned agent, and last user message.
+
+## Frontend behavior notes
+- Super-admin company switcher in `components/Layout.tsx`: desktop uses chip buttons; mobile uses a dropdown to avoid horizontal overflow.
+- Admin users table in `pages/AdminUsers.tsx` intentionally uses horizontal scroll on small screens to preserve column layout.
+- Outbound lines page in `pages/OutboundLines.tsx` no longer exposes manual line creation in UI; lines are expected to be registered by the call center and can then be managed (activate/deactivate/delete).
 
 ## Auth
 - Admins: JWT bearer. `get_current_active_user` from `core/security.py` guards routes; `get_active_admin` enforces `role=ADMIN` for admin-only areas. Passwords hashed with bcrypt. Roles: `ADMIN` (full access) vs `AGENT` (only Numbers endpoints/UI, filtered to their assigned numbers, add/import hidden).

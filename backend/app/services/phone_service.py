@@ -2,15 +2,18 @@ import io
 from datetime import datetime, timezone, date
 import re
 from typing import Iterable, Sequence
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.dialects.postgresql import insert
 
-from ..models.phone_number import PhoneNumber, CallStatus
+from ..models.phone_number import PhoneNumber, CallStatus, GlobalStatus
 from ..models.call_result import CallResult
 from ..models.user import AdminUser, UserRole
+from ..models.company import Company
+from ..core.config import get_settings
 from ..schemas.phone_number import (
     PhoneNumberCreate,
     PhoneNumberStatusUpdate,
@@ -21,6 +24,8 @@ from ..schemas.phone_number import (
 from openpyxl import Workbook
 
 PHONE_PATTERN = re.compile(r"^09\d{9}$")
+settings = get_settings()
+LOCAL_TZ = ZoneInfo(settings.timezone)
 MUTABLE_STATUSES = {
     CallStatus.IN_QUEUE,
     CallStatus.MISSED,
@@ -30,26 +35,59 @@ MUTABLE_STATUSES = {
 }
 
 
+def _sync_global_status_from_call_status(number: PhoneNumber, status: CallStatus) -> None:
+    """
+    Sync shared/global status on numbers table for statuses that must apply to all companies.
+    """
+    if status == CallStatus.POWER_OFF:
+        number.global_status = GlobalStatus.POWER_OFF
+    elif status == CallStatus.COMPLAINED:
+        number.global_status = GlobalStatus.COMPLAINED
+    else:
+        number.global_status = GlobalStatus.ACTIVE
+
+
 def _require_admin(user: AdminUser):
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins only")
 
 
-def _ensure_mutable_status(number: PhoneNumber, current_user: AdminUser):
+def _resolve_company_id(db: Session, current_user: AdminUser, company_name: str | None) -> int | None:
+    """Return the target company_id based on user context and optional company_name override."""
+    target = current_user.company_id
+    if company_name:
+        company_obj = db.query(Company).filter(Company.name == company_name).first()
+        if not company_obj:
+            raise HTTPException(status_code=404, detail="Company not found")
+        if not current_user.is_superuser and current_user.company_id != company_obj.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this company")
+        target = company_obj.id
+    elif not current_user.is_superuser and current_user.company_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not assigned to a company")
+    return target
+
+
+def _latest_status_for_company(db: Session, number_id: int, company_id: int) -> CallStatus:
+    latest_call = (
+        db.query(CallResult)
+        .filter(CallResult.phone_number_id == number_id, CallResult.company_id == company_id)
+        .order_by(CallResult.id.desc())
+        .first()
+    )
+    if not latest_call or not latest_call.status:
+        return CallStatus.IN_QUEUE
+    return CallStatus(latest_call.status)
+
+
+def _ensure_mutable_for_user(db: Session, number_id: int, company_id: int, current_user: AdminUser) -> None:
     if current_user.is_superuser:
         return
-    if number.status not in MUTABLE_STATUSES:
+    current_status = _latest_status_for_company(db, number_id, company_id)
+    if current_status not in MUTABLE_STATUSES:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only numbers in IN_QUEUE, MISSED, BUSY, POWER_OFF, or BANNED can be changed",
+            status_code=400,
+            detail=f"Status {current_status.value} cannot be changed by non-superuser",
         )
-
-
-def _ensure_can_access(number: PhoneNumber, current_user: AdminUser):
-    if current_user.is_superuser:
-        return
-    if current_user.role == UserRole.AGENT and number.assigned_agent_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed for this number")
 
 
 def normalize_phone(raw: str) -> str | None:
@@ -72,7 +110,6 @@ def add_numbers(db: Session, payload: PhoneNumberCreate, current_user: AdminUser
     normalized = [normalize_phone(p) for p in payload.phone_numbers]
     invalid_numbers = [p for p, norm in zip(payload.phone_numbers, normalized) if norm is None]
 
-    # Keep first occurrence of each valid number to avoid duplicate work in one batch
     seen: set[str] = set()
     unique_valid: list[str] = []
     for norm in normalized:
@@ -87,7 +124,7 @@ def add_numbers(db: Session, payload: PhoneNumberCreate, current_user: AdminUser
     if unique_valid:
         stmt = (
             insert(PhoneNumber)
-            .values([{"phone_number": n, "status": CallStatus.IN_QUEUE} for n in unique_valid])
+            .values([{"phone_number": n} for n in unique_valid])
             .on_conflict_do_nothing(index_elements=[PhoneNumber.phone_number])
         )
         result = db.execute(stmt)
@@ -102,10 +139,86 @@ def add_numbers(db: Session, payload: PhoneNumberCreate, current_user: AdminUser
     }
 
 
+def _apply_status_filter(query, status: CallStatus | None, target_company_id: int | None, db: Session):
+    """Apply per-company status filter via call_results subquery.
+    Uses max(id) — not max(attempted_at) — to correctly identify the latest record
+    even when multiple rows share the same timestamp.
+    """
+    if not status or not target_company_id:
+        return query
+    if status == CallStatus.IN_QUEUE:
+        # IN_QUEUE = no call record for this company yet
+        return query.filter(
+            ~db.query(CallResult.id).filter(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == target_company_id,
+            ).correlate(PhoneNumber).exists()
+        )
+    else:
+        # Find the latest call_result by id (highest id = most recently inserted)
+        latest_id_subq = (
+            db.query(func.max(CallResult.id))
+            .filter(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == target_company_id,
+            )
+            .correlate(PhoneNumber)
+            .scalar_subquery()
+        )
+        return query.filter(
+            db.query(CallResult.id).filter(
+                CallResult.id == latest_id_subq,
+                CallResult.status == status,
+            ).correlate(PhoneNumber).exists()
+        )
+
+
+def _local_date_start_utc(value: date) -> datetime:
+    local_start = datetime(value.year, value.month, value.day, 0, 0, 0, tzinfo=LOCAL_TZ)
+    return local_start.astimezone(timezone.utc)
+
+
+def _local_date_end_utc(value: date) -> datetime:
+    local_end = datetime(value.year, value.month, value.day, 23, 59, 59, 999999, tzinfo=LOCAL_TZ)
+    return local_end.astimezone(timezone.utc)
+
+
+def _apply_date_filter(
+    query,
+    db: Session,
+    target_company_id: int | None,
+    start_date: date | None,
+    end_date: date | None,
+):
+    if not start_date and not end_date:
+        return query
+
+    if target_company_id:
+        predicates = [
+            CallResult.phone_number_id == PhoneNumber.id,
+            CallResult.company_id == target_company_id,
+        ]
+        if start_date:
+            predicates.append(CallResult.attempted_at >= _local_date_start_utc(start_date))
+        if end_date:
+            predicates.append(CallResult.attempted_at <= _local_date_end_utc(end_date))
+        return query.filter(
+            db.query(CallResult.id).filter(*predicates).correlate(PhoneNumber).exists()
+        )
+
+    if start_date:
+        query = query.filter(PhoneNumber.last_called_at >= _local_date_start_utc(start_date))
+    if end_date:
+        query = query.filter(PhoneNumber.last_called_at <= _local_date_end_utc(end_date))
+    return query
+
+
 def list_numbers(
     db: Session,
     current_user: AdminUser,
+    company_name: str | None = None,
     status: CallStatus | None = None,
+    global_status: GlobalStatus | None = None,
     search: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -115,137 +228,202 @@ def list_numbers(
     sort_order: str = "desc",
     agent_id: int | None = None,
 ):
-    query = db.query(PhoneNumber).options(joinedload(PhoneNumber.assigned_agent))
-    if current_user.role == UserRole.AGENT:
-        query = query.filter(PhoneNumber.assigned_agent_id == current_user.id)
-    elif agent_id:
-        query = query.filter(PhoneNumber.assigned_agent_id == agent_id)
-    if status:
-        query = query.filter(PhoneNumber.status == status)
-    if start_date:
-        query = query.filter(
-            PhoneNumber.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-        )
-    if end_date:
-        query = query.filter(
-            PhoneNumber.created_at <= datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
-        )
+    target_company_id = _resolve_company_id(db, current_user, company_name)
+
+    numbers = db.query(PhoneNumber)
+
     if search:
-        query = (
-            query.outerjoin(AdminUser, PhoneNumber.assigned_agent_id == AdminUser.id)
-            .filter(
-                (PhoneNumber.phone_number.ilike(f"%{search}%"))
-                | (AdminUser.username.ilike(f"%{search}%"))
-                | (AdminUser.first_name.ilike(f"%{search}%"))
-                | (AdminUser.last_name.ilike(f"%{search}%"))
-                | (AdminUser.phone_number.ilike(f"%{search}%"))
+        numbers = numbers.filter(PhoneNumber.phone_number.ilike(f"%{search}%"))
+    if global_status is not None:
+        numbers = numbers.filter(PhoneNumber.global_status == global_status)
+
+    numbers = _apply_date_filter(numbers, db, target_company_id, start_date, end_date)
+
+    numbers = _apply_status_filter(numbers, status, target_company_id, db)
+
+    # Build sort column — last_attempt_at and status live in call_results
+    if sort_by == "last_attempt_at" and target_company_id:
+        column = (
+            select(func.max(CallResult.attempted_at))
+            .where(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == target_company_id,
             )
+            .correlate(PhoneNumber)
+            .scalar_subquery()
         )
-
-    sort_map = {
-        "created_at": PhoneNumber.created_at,
-        "last_attempt_at": PhoneNumber.last_attempt_at,
-        "status": PhoneNumber.status,
-    }
-    column = sort_map.get(sort_by, PhoneNumber.created_at)
-    if sort_order == "asc":
-        query = query.order_by(column.asc().nulls_last())
+    elif sort_by == "status" and target_company_id:
+        column = (
+            select(CallResult.status)
+            .where(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == target_company_id,
+                CallResult.id == (
+                    select(func.max(CallResult.id))
+                    .where(
+                        CallResult.phone_number_id == PhoneNumber.id,
+                        CallResult.company_id == target_company_id,
+                    )
+                    .correlate(PhoneNumber)
+                    .scalar_subquery()
+                ),
+            )
+            .correlate(PhoneNumber)
+            .scalar_subquery()
+        )
     else:
-        query = query.order_by(column.desc().nulls_last())
+        sort_map = {"created_at": PhoneNumber.id, "id": PhoneNumber.id, "last_called_at": PhoneNumber.last_called_at}
+        column = sort_map.get(sort_by, PhoneNumber.id)
 
-    return query.offset(skip).limit(limit).all()
+    numbers = numbers.order_by(column.desc().nulls_last() if sort_order == "desc" else column.asc().nulls_last())
+
+    number_list = numbers.offset(skip).limit(limit).all()
+
+    # For each number, enrich with company-specific call data
+    if target_company_id and number_list:
+        _enrich_with_call_data(db, number_list, target_company_id)
+
+    return number_list
+
+
+def _enrich_with_call_data(db: Session, number_list: list, target_company_id: int):
+    """Populate virtual fields on PhoneNumber objects from call_results.
+    Orders by id DESC so that when timestamps tie, the most recently inserted row wins.
+    """
+    number_ids = [n.id for n in number_list]
+    all_calls = (
+        db.query(CallResult)
+        .filter(
+            CallResult.phone_number_id.in_(number_ids),
+            CallResult.company_id == target_company_id,
+        )
+        .order_by(CallResult.id.desc())
+        .all()
+    )
+    call_data_map: dict = {}
+    call_counts: dict = {}
+    for call in all_calls:
+        call_counts[call.phone_number_id] = call_counts.get(call.phone_number_id, 0) + 1
+        if call.phone_number_id not in call_data_map:
+            call_data_map[call.phone_number_id] = call
+
+    for number in number_list:
+        latest_call = call_data_map.get(number.id)
+        if latest_call:
+            number.status = latest_call.status
+            number.last_attempt_at = latest_call.attempted_at
+            number.last_user_message = latest_call.user_message
+            number.assigned_agent_id = latest_call.agent_id
+            number.total_attempts = call_counts.get(number.id, 0)
 
 
 def count_numbers(
     db: Session,
     current_user: AdminUser,
+    company_name: str | None = None,
     status: CallStatus | None = None,
+    global_status: GlobalStatus | None = None,
     search: str | None = None,
     agent_id: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> int:
+    target_company_id = _resolve_company_id(db, current_user, company_name)
+
     query = db.query(func.count(PhoneNumber.id))
-    if current_user.role == UserRole.AGENT:
-        query = query.filter(PhoneNumber.assigned_agent_id == current_user.id)
-    elif agent_id:
-        query = query.filter(PhoneNumber.assigned_agent_id == agent_id)
-    if status:
-        query = query.filter(PhoneNumber.status == status)
-    if start_date:
-        query = query.filter(
-            PhoneNumber.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-        )
-    if end_date:
-        query = query.filter(
-            PhoneNumber.created_at <= datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
-        )
+
     if search:
-        query = (
-            query.outerjoin(AdminUser, PhoneNumber.assigned_agent_id == AdminUser.id)
-            .filter(
-                (PhoneNumber.phone_number.ilike(f"%{search}%"))
-                | (AdminUser.username.ilike(f"%{search}%"))
-                | (AdminUser.first_name.ilike(f"%{search}%"))
-                | (AdminUser.last_name.ilike(f"%{search}%"))
-                | (AdminUser.phone_number.ilike(f"%{search}%"))
-            )
-        )
+        query = query.filter(PhoneNumber.phone_number.ilike(f"%{search}%"))
+    if global_status is not None:
+        query = query.filter(PhoneNumber.global_status == global_status)
+
+    query = _apply_date_filter(query, db, target_company_id, start_date, end_date)
+
+    query = _apply_status_filter(query, status, target_company_id, db)
+
     return query.scalar() or 0
 
 
-def update_number_status(db: Session, number_id: int, data: PhoneNumberStatusUpdate, current_user: AdminUser) -> PhoneNumber:
+def update_number_status(db: Session, number_id: int, data: PhoneNumberStatusUpdate, current_user: AdminUser, company_name: str | None = None) -> PhoneNumber:
+    """Update the latest call_result status for this number+company."""
+    _require_admin(current_user)
     number = db.get(PhoneNumber, number_id)
     if not number:
         raise HTTPException(status_code=404, detail="Number not found")
-    _ensure_can_access(number, current_user)
-    _ensure_mutable_status(number, current_user)
-    number.status = data.status
-    number.last_status_change_at = datetime.now(timezone.utc)
-    if data.note:
-        number.note = data.note
-    db.commit()
-    db.refresh(number)
+
+    target_company_id = _resolve_company_id(db, current_user, company_name)
+    _sync_global_status_from_call_status(number, data.status)
+
+    if target_company_id:
+        _ensure_mutable_for_user(db, number_id, target_company_id, current_user)
+        latest_call = (
+            db.query(CallResult)
+            .filter(
+                CallResult.phone_number_id == number_id,
+                CallResult.company_id == target_company_id,
+            )
+            .order_by(CallResult.id.desc())
+            .first()
+        )
+        if latest_call:
+            latest_call.status = data.status
+        else:
+            db.add(CallResult(
+                phone_number_id=number_id,
+                company_id=target_company_id,
+                status=data.status,
+                attempted_at=datetime.now(timezone.utc),
+            ))
+        db.commit()
+
+    # Refresh virtual fields
+    if target_company_id:
+        _enrich_with_call_data(db, [number], target_company_id)
+
     return number
 
 
 def bulk_reset(db: Session, ids: Iterable[int], status: CallStatus = CallStatus.IN_QUEUE) -> int:
     numbers = db.query(PhoneNumber).filter(PhoneNumber.id.in_(list(ids))).all()
     for num in numbers:
-        num.status = status
         num.assigned_at = None
         num.assigned_batch_id = None
-        num.total_attempts = 0
-        num.last_attempt_at = None
-        num.last_status_change_at = datetime.now(timezone.utc)
     db.commit()
     return len(numbers)
 
 
-def delete_number(db: Session, number_id: int, current_user: AdminUser) -> None:
+def delete_number(db: Session, number_id: int, current_user: AdminUser, company_name: str | None = None) -> None:
+    _require_admin(current_user)
     number = db.get(PhoneNumber, number_id)
     if not number:
         raise HTTPException(status_code=404, detail="Number not found")
-    _ensure_can_access(number, current_user)
-    _ensure_mutable_status(number, current_user)
+    target_company_id = _resolve_company_id(db, current_user, company_name)
+    if target_company_id:
+        _ensure_mutable_for_user(db, number_id, target_company_id, current_user)
     db.query(CallResult).filter(CallResult.phone_number_id == number_id).delete(synchronize_session=False)
     db.delete(number)
     db.commit()
 
 
-def reset_number(db: Session, number_id: int, current_user: AdminUser) -> PhoneNumber:
+def reset_number(db: Session, number_id: int, current_user: AdminUser, company_name: str | None = None) -> PhoneNumber:
+    """Reset a number so it can be re-dialed by this company."""
+    _require_admin(current_user)
     number = db.get(PhoneNumber, number_id)
     if not number:
         raise HTTPException(status_code=404, detail="Number not found")
-    _ensure_can_access(number, current_user)
-    _ensure_mutable_status(number, current_user)
-    number.status = CallStatus.IN_QUEUE
+
+    target_company_id = _resolve_company_id(db, current_user, company_name)
+    if target_company_id:
+        _ensure_mutable_for_user(db, number_id, target_company_id, current_user)
+    # Delete call_results for this company so the dialer picks it up again
+    if target_company_id:
+        db.query(CallResult).filter(
+            CallResult.phone_number_id == number_id,
+            CallResult.company_id == target_company_id,
+        ).delete(synchronize_session=False)
+
     number.assigned_at = None
     number.assigned_batch_id = None
-    number.assigned_agent_id = None
-    number.total_attempts = 0
-    number.last_attempt_at = None
-    number.last_status_change_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(number)
     return number
@@ -257,32 +435,26 @@ def _build_query(
     select_all: bool,
     ids: Sequence[int],
     filter_status: CallStatus | None,
+    filter_global_status: GlobalStatus | None,
     search: str | None,
     excluded_ids: Sequence[int],
+    target_company_id: int | None = None,
     agent_id: int | None = None,
     require_mutable: bool = False,
     start_date: date | None = None,
     end_date: date | None = None,
 ):
     query = db.query(PhoneNumber)
-    if current_user.role == UserRole.AGENT:
-        query = query.filter(PhoneNumber.assigned_agent_id == current_user.id)
-    elif agent_id:
-        query = query.filter(PhoneNumber.assigned_agent_id == agent_id)
-    if filter_status:
-        query = query.filter(PhoneNumber.status == filter_status)
+
     if search:
         query = query.filter(PhoneNumber.phone_number.ilike(f"%{search}%"))
-    if start_date:
-        query = query.filter(
-            PhoneNumber.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
-        )
-    if end_date:
-        query = query.filter(
-            PhoneNumber.created_at <= datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
-        )
-    if require_mutable and not current_user.is_superuser:
-        query = query.filter(PhoneNumber.status.in_(MUTABLE_STATUSES))
+
+    query = _apply_date_filter(query, db, target_company_id, start_date, end_date)
+
+    query = _apply_status_filter(query, filter_status, target_company_id, db)
+    if filter_global_status is not None:
+        query = query.filter(PhoneNumber.global_status == filter_global_status)
+
     if select_all:
         if excluded_ids:
             query = query.filter(~PhoneNumber.id.in_(excluded_ids))
@@ -292,8 +464,11 @@ def _build_query(
 
 
 def bulk_action(db: Session, payload: PhoneNumberBulkAction, current_user: AdminUser) -> PhoneNumberBulkResult:
+    _require_admin(current_user)
     if not payload.select_all and not payload.ids:
         raise HTTPException(status_code=400, detail="No numbers selected")
+
+    target_company_id = _resolve_company_id(db, current_user, getattr(payload, "company_name", None))
 
     base_query = _build_query(
         db,
@@ -301,21 +476,10 @@ def bulk_action(db: Session, payload: PhoneNumberBulkAction, current_user: Admin
         select_all=payload.select_all,
         ids=payload.ids,
         filter_status=payload.filter_status,
+        filter_global_status=payload.filter_global_status,
         search=payload.search,
         excluded_ids=payload.excluded_ids,
-        agent_id=payload.agent_id,
-        start_date=_parse_iso_date(payload.start_date),
-        end_date=_parse_iso_date(payload.end_date),
-    )
-    mutable_query = _build_query(
-        db,
-        current_user=current_user,
-        select_all=payload.select_all,
-        ids=payload.ids,
-        filter_status=payload.filter_status,
-        search=payload.search,
-        excluded_ids=payload.excluded_ids,
-        require_mutable=True,
+        target_company_id=target_company_id,
         agent_id=payload.agent_id,
         start_date=_parse_iso_date(payload.start_date),
         end_date=_parse_iso_date(payload.end_date),
@@ -327,66 +491,90 @@ def bulk_action(db: Session, payload: PhoneNumberBulkAction, current_user: Admin
     if total_selected == 0:
         return result
 
-    def _require_mutable_selection():
-        if current_user.is_superuser:
-            return
-        mutable_count = mutable_query.count()
-        if mutable_count != total_selected:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only numbers in IN_QUEUE, MISSED, BUSY, POWER_OFF, or BANNED can be changed",
-            )
-
     if payload.action == "delete":
-        _require_mutable_selection()
-        id_subquery = mutable_query.with_entities(PhoneNumber.id)
+        id_subquery = base_query.with_entities(PhoneNumber.id)
         db.query(CallResult).filter(CallResult.phone_number_id.in_(id_subquery)).delete(synchronize_session=False)
-        result.deleted = mutable_query.delete(synchronize_session=False)
+        result.deleted = base_query.delete(synchronize_session=False)
         db.commit()
         return result
 
     if payload.action == "reset":
-        _require_mutable_selection()
-        now = datetime.now(timezone.utc)
+        # Delete call_results for this company → dialer will re-call these numbers
+        number_ids = [r.id for r in base_query.with_entities(PhoneNumber.id).all()]
+        if target_company_id and number_ids:
+            db.query(CallResult).filter(
+                CallResult.phone_number_id.in_(number_ids),
+                CallResult.company_id == target_company_id,
+            ).delete(synchronize_session=False)
         result.reset = (
-            mutable_query.update(
-                {
-                    PhoneNumber.status: CallStatus.IN_QUEUE,
-                    PhoneNumber.assigned_at: None,
-                    PhoneNumber.assigned_batch_id: None,
-                    PhoneNumber.assigned_agent_id: None,
-                    PhoneNumber.total_attempts: 0,
-                    PhoneNumber.last_attempt_at: None,
-                    PhoneNumber.last_status_change_at: now,
-                },
+            base_query.update(
+                {PhoneNumber.assigned_at: None, PhoneNumber.assigned_batch_id: None},
                 synchronize_session=False,
-            )
-            or 0
+            ) or 0
         )
         db.commit()
         return result
 
-    if payload.action == "update_status":
-        if not payload.status:
-            raise HTTPException(status_code=400, detail="status is required for update_status action")
-        _require_mutable_selection()
-        now = datetime.now(timezone.utc)
-        updates = {
-            PhoneNumber.status: payload.status,
-            PhoneNumber.last_status_change_at: now,
-        }
-        if payload.note is not None:
-            updates[PhoneNumber.note] = payload.note
-        result.updated = mutable_query.update(updates, synchronize_session=False) or 0
-        db.commit()
+    if payload.action == "update_status" and payload.status:
+        if target_company_id:
+            number_ids = [r.id for r in base_query.with_entities(PhoneNumber.id).all()]
+            if not current_user.is_superuser:
+                for num_id in number_ids:
+                    _ensure_mutable_for_user(db, num_id, target_company_id, current_user)
+            shared_status = (
+                GlobalStatus.POWER_OFF
+                if payload.status == CallStatus.POWER_OFF
+                else GlobalStatus.COMPLAINED
+                if payload.status == CallStatus.COMPLAINED
+                else GlobalStatus.ACTIVE
+            )
+            db.query(PhoneNumber).filter(PhoneNumber.id.in_(number_ids)).update(
+                {PhoneNumber.global_status: shared_status},
+                synchronize_session=False,
+            )
+            # Fetch latest call_result per number in a single query (highest id wins)
+            latest_id_rows = (
+                db.query(func.max(CallResult.id))
+                .filter(
+                    CallResult.phone_number_id.in_(number_ids),
+                    CallResult.company_id == target_company_id,
+                )
+                .group_by(CallResult.phone_number_id)
+                .all()
+            )
+            latest_ids = [row[0] for row in latest_id_rows if row[0] is not None]
+            latest_calls = (
+                db.query(CallResult).filter(CallResult.id.in_(latest_ids)).all()
+                if latest_ids else []
+            )
+            existing = {cr.phone_number_id: cr for cr in latest_calls}
+            now_utc = datetime.now(timezone.utc)
+            updated = 0
+            for num_id in number_ids:
+                if num_id in existing:
+                    existing[num_id].status = payload.status
+                else:
+                    db.add(CallResult(
+                        phone_number_id=num_id,
+                        company_id=target_company_id,
+                        status=payload.status,
+                        attempted_at=now_utc,
+                    ))
+                updated += 1
+            db.commit()
+            result.updated = updated
         return result
 
     raise HTTPException(status_code=400, detail="Unsupported action")
 
 
 def export_numbers(db: Session, payload: PhoneNumberExportRequest, current_user: AdminUser) -> io.BytesIO:
+    _require_admin(current_user)
     if not payload.select_all and not payload.ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No numbers selected")
+
+    target_company_id = _resolve_company_id(db, current_user, getattr(payload, "company_name", None))
+
     start = _parse_iso_date(payload.start_date)
     end = _parse_iso_date(payload.end_date)
     query = _build_query(
@@ -395,19 +583,46 @@ def export_numbers(db: Session, payload: PhoneNumberExportRequest, current_user:
         select_all=payload.select_all,
         ids=payload.ids,
         filter_status=payload.filter_status,
+        filter_global_status=payload.filter_global_status,
         search=payload.search,
         excluded_ids=payload.excluded_ids,
+        target_company_id=target_company_id,
         agent_id=payload.agent_id,
         start_date=start,
         end_date=end,
-    ).options(joinedload(PhoneNumber.assigned_agent))
+    )
 
-    sort_map = {
-        "created_at": PhoneNumber.created_at,
-        "last_attempt_at": PhoneNumber.last_attempt_at,
-        "status": PhoneNumber.status,
-    }
-    sort_col = sort_map.get(payload.sort_by, PhoneNumber.created_at)
+    # Sort
+    if payload.sort_by == "last_attempt_at" and target_company_id:
+        sort_col = (
+            select(func.max(CallResult.attempted_at))
+            .where(CallResult.phone_number_id == PhoneNumber.id, CallResult.company_id == target_company_id)
+            .correlate(PhoneNumber)
+            .scalar_subquery()
+        )
+    elif payload.sort_by == "status" and target_company_id:
+        sort_col = (
+            select(CallResult.status)
+            .where(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == target_company_id,
+                CallResult.id == (
+                    select(func.max(CallResult.id))
+                    .where(
+                        CallResult.phone_number_id == PhoneNumber.id,
+                        CallResult.company_id == target_company_id,
+                    )
+                    .correlate(PhoneNumber)
+                    .scalar_subquery()
+                ),
+            )
+            .correlate(PhoneNumber)
+            .scalar_subquery()
+        )
+    else:
+        sort_map = {"created_at": PhoneNumber.id, "id": PhoneNumber.id, "last_called_at": PhoneNumber.last_called_at}
+        sort_col = sort_map.get(payload.sort_by, PhoneNumber.id)
+
     if payload.sort_order == "asc":
         query = query.order_by(sort_col.asc().nulls_last())
     else:
@@ -415,49 +630,30 @@ def export_numbers(db: Session, payload: PhoneNumberExportRequest, current_user:
 
     numbers = query.all()
 
+    # Enrich with call data for export
+    if target_company_id and numbers:
+        _enrich_with_call_data(db, numbers, target_company_id)
+
     wb = Workbook()
     ws = wb.active
     ws.title = "numbers"
-    ws.append(
-        [
-            "ID",
-            "Phone Number",
-            "Status",
-            "Total Attempts",
-            "Last Attempt",
-            "Last Status Change",
-            "Agent Name",
-            "Agent Phone",
-            "Last User Message",
-        ]
-    )
+    ws.append(["شماره", "وضعیت", "تعداد تلاش", "آخرین تلاش", "پیام تماس"])
 
     for num in numbers:
-        agent_name = None
-        agent_phone = None
-        if num.assigned_agent:
-            agent_name = " ".join(filter(None, [num.assigned_agent.first_name, num.assigned_agent.last_name])).strip()
-            if not agent_name:
-                agent_name = num.assigned_agent.username
-            agent_phone = num.assigned_agent.phone_number
-        ws.append(
-            [
-                num.id,
-                num.phone_number,
-                num.status.value if isinstance(num.status, CallStatus) else num.status,
-                num.total_attempts,
-                num.last_attempt_at.isoformat() if num.last_attempt_at else None,
-                num.last_status_change_at.isoformat() if num.last_status_change_at else None,
-                agent_name,
-                agent_phone,
-                num.last_user_message,
-            ]
-        )
+        ws.append([
+            num.phone_number,
+            getattr(num, "status", None) or "IN_QUEUE",
+            getattr(num, "total_attempts", 0),
+            getattr(num, "last_attempt_at", None).isoformat() if getattr(num, "last_attempt_at", None) else None,
+            getattr(num, "last_user_message", None),
+        ])
 
     stream = io.BytesIO()
     wb.save(stream)
     stream.seek(0)
     return stream
+
+
 def _parse_iso_date(date_str: str | None) -> date | None:
     if not date_str:
         return None

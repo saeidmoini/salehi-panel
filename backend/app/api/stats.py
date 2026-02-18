@@ -12,17 +12,42 @@ router = APIRouter(dependencies=[Depends(get_active_admin)])
 
 
 @router.get("/numbers-summary", response_model=NumbersSummary)
-def get_numbers_summary(db: Session = Depends(get_db)):
-    return stats_service.numbers_summary(db)
+def get_numbers_summary(
+    company: str | None = Query(default=None, description="Company slug to filter by"),
+    user: AdminUser = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    company_id = None
+    if company:
+        company_obj = db.query(Company).filter(Company.name == company, Company.is_active == True).first()
+        if not company_obj:
+            raise HTTPException(status_code=404, detail="Company not found")
+        if not user.is_superuser and user.company_id != company_obj.id:
+            raise HTTPException(status_code=403, detail="Access denied to this company")
+        company_id = company_obj.id
+    elif user.company_id:
+        company_id = user.company_id
+    return stats_service.numbers_summary(db, company_id=company_id)
 
 
 @router.get("/attempt-trend", response_model=AttemptTrendResponse)
 def get_attempt_trend(
     span: int = Query(default=14, ge=1, le=240, description="Number of buckets to include"),
     granularity: str = Query(default="day", pattern="^(day|hour)$"),
+    company: str | None = Query(default=None, description="Company slug to filter by"),
+    user: AdminUser = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    return stats_service.attempt_trend(db, span=span, granularity=granularity)
+    company_id = None
+    if company:
+        company_obj = db.query(Company).filter(Company.name == company, Company.is_active == True).first()
+        if not company_obj:
+            raise HTTPException(status_code=404, detail="Company not found")
+        if not user.is_superuser and user.company_id != company_obj.id:
+            raise HTTPException(status_code=403, detail="Access denied to this company")
+        company_id = company_obj.id
+
+    return stats_service.attempt_trend(db, span=span, granularity=granularity, company_id=company_id)
 
 
 @router.get("/attempts-summary", response_model=AttemptSummary)

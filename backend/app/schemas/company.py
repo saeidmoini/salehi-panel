@@ -6,7 +6,7 @@ class CompanyBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     display_name: str = Field(..., min_length=1, max_length=255)
     is_active: bool = True
-    settings: dict = {}
+    settings: dict = Field(default_factory=dict)
 
 
 class CompanyCreate(CompanyBase):
@@ -14,9 +14,14 @@ class CompanyCreate(CompanyBase):
 
 
 class CompanyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
     display_name: str | None = None
     is_active: bool | None = None
     settings: dict | None = None
+
+
+class CompanyDeleteRequest(BaseModel):
+    confirm_name: str = Field(..., min_length=1, max_length=64)
 
 
 class CompanyOut(CompanyBase):

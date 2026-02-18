@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     skip_holidays_default: bool = Field(True, alias="SKIP_HOLIDAYS")
     assignment_timeout_minutes: int = Field(60, alias="ASSIGNMENT_TIMEOUT_MINUTES")
     call_cooldown_days: int = Field(3, alias="CALL_COOLDOWN_DAYS")
-    short_retry_seconds: int = 120
+    short_retry_seconds: int = 300
     long_retry_seconds: int = 900
     cors_origins: list[str] = Field(
         default_factory=lambda: [

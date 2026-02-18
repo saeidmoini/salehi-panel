@@ -65,13 +65,14 @@ const statusLabels: Record<string, string> = {
   CONNECTED: 'وصل شده',
   DISCONNECTED: 'وصل نشده',
   NOT_INTERESTED: 'عدم نیاز کاربر',
-  HANGUP: 'قطع تماس توسط کاربر',
+  HANGUP: 'قطع شده',
   UNKNOWN: 'نامشخص',
-  MISSED: 'بی‌پاسخ',
+  MISSED: 'از دست رفته',
   BUSY: 'اشغال',
   POWER_OFF: 'خاموش',
   FAILED: 'خطا',
   INBOUND_CALL: 'تماس ورودی',
+  BANNED: 'بن شده',
   IN_QUEUE: 'در صف تماس',
 }
 
@@ -86,6 +87,7 @@ const statusColors: Record<string, string> = {
   POWER_OFF: '#1e293b',
   FAILED: '#ef4444',
   INBOUND_CALL: '#0ea5e9',
+  BANNED: '#be123c',
 }
 
 const BILLABLE_STATUSES = [
@@ -105,9 +107,11 @@ const DashboardPage = () => {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
   const [trend, setTrend] = useState<AttemptTrendResponse | null>(null)
-  const [trendMode, setTrendMode] = useState<'hour6' | 'hour24' | 'day7' | 'day30'>('hour24')
-  const filteredStatuses = useMemo(() => Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), [])
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(filteredStatuses)
+  const [trendMode, setTrendMode] = useState<'hour24' | 'day7' | 'day14' | 'day30'>('hour24')
+  const filteredStatuses = useMemo(() => [...Object.keys(statusLabels).filter((s) => s !== 'IN_QUEUE'), 'BILLABLE'], [])
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(() =>
+    ['HANGUP', 'MISSED', 'BILLABLE']
+  )
 
   const [groupBy, setGroupBy] = useState<GroupBy>('scenario')
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today')
@@ -163,8 +167,11 @@ const DashboardPage = () => {
   }
 
   const fetchNumbers = async () => {
+    if (!company) return
     try {
-      const { data } = await client.get<NumbersSummary>('/api/stats/numbers-summary')
+      const { data } = await client.get<NumbersSummary>('/api/stats/numbers-summary', {
+        params: { company: company.name }
+      })
       setNumbersSummary(data)
     } catch (error) {
       console.error('Failed to fetch numbers', error)
@@ -172,10 +179,11 @@ const DashboardPage = () => {
   }
 
   const fetchTrend = async (mode: typeof trendMode) => {
-    const params: Record<string, number | string> = {}
-    if (mode === 'hour6') { params.granularity = 'hour'; params.span = 6 }
-    else if (mode === 'hour24') { params.granularity = 'hour'; params.span = 24 }
+    if (!company) return
+    const params: Record<string, number | string> = { company: company.name }
+    if (mode === 'hour24') { params.granularity = 'hour'; params.span = 24 }
     else if (mode === 'day7') { params.granularity = 'day'; params.span = 7 }
+    else if (mode === 'day14') { params.granularity = 'day'; params.span = 14 }
     else if (mode === 'day30') { params.granularity = 'day'; params.span = 30 }
     try {
       const { data } = await client.get<AttemptTrendResponse>('/api/stats/attempt-trend', { params })
@@ -230,6 +238,29 @@ const DashboardPage = () => {
     )
     const datasets = selectedStatuses.map((status) => {
       const color = statusColors[status] || '#0ea5e9'
+
+      // Special handling for BILLABLE virtual status
+      if (status === 'BILLABLE') {
+        return {
+          label: 'انجام شده',
+          statusKey: 'BILLABLE',
+          data: trend.buckets.map((bucket) => {
+            const billableCount = BILLABLE_STATUSES.reduce((sum, billableStatus) => {
+              const match = bucket.status_counts.find((s) => s.status === billableStatus)
+              return sum + (match ? match.count : 0)
+            }, 0)
+            const total = bucket.total_attempts
+            return total > 0 ? Number(((billableCount / total) * 100).toFixed(2)) : 0
+          }),
+          borderColor: '#3b82f6',
+          backgroundColor: '#3b82f620',
+          fill: false,
+          tension: 0.35,
+          pointRadius: 3,
+          borderWidth: 3,
+        }
+      }
+
       return {
         label: statusLabels[status] || status,
         statusKey: status,
@@ -254,9 +285,9 @@ const DashboardPage = () => {
   }
 
   const trendModeLabel =
-    trendMode === 'hour6' ? '۶ ساعت گذشته'
-      : trendMode === 'hour24' ? '۲۴ ساعت گذشته'
-        : trendMode === 'day7' ? '۷ روز گذشته'
+    trendMode === 'hour24' ? '۲۴ ساعت گذشته'
+      : trendMode === 'day7' ? '۷ روز گذشته'
+        : trendMode === 'day14' ? '۱۴ روز گذشته'
           : '۳۰ روز گذشته'
 
   return (
@@ -286,7 +317,7 @@ const DashboardPage = () => {
             {costs ? costs.daily_cost.toLocaleString() : '-'} تومان
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            {costs ? costs.daily_count : '-'} تماس برقرار شده
+            {costs ? costs.daily_count : '-'} تماس انجام شده
           </div>
         </div>
 
@@ -384,7 +415,7 @@ const DashboardPage = () => {
           <div className="text-center py-8 text-slate-500">در حال بارگذاری...</div>
         ) : stats ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
+            <table className="w-full text-base border-collapse">
               <thead>
                 <tr className="bg-slate-50">
                   <th className="border border-slate-200 px-3 py-2 text-right font-semibold">
@@ -401,10 +432,7 @@ const DashboardPage = () => {
                     مجموع
                   </th>
                   <th className="border border-slate-200 px-3 py-2 text-center font-semibold bg-blue-50">
-                    قابل صدور هزینه
-                  </th>
-                  <th className="border border-slate-200 px-3 py-2 text-center font-semibold bg-green-50">
-                    تماس ورودی
+                    انجام شده
                   </th>
                 </tr>
               </thead>
@@ -424,7 +452,7 @@ const DashboardPage = () => {
                             {count > 0 ? (
                               <>
                                 {count.toLocaleString()}
-                                <span className="text-xs text-slate-500 mr-1">({percentage}%)</span>
+                                <span className="text-sm text-slate-500 mr-1">({percentage}%)</span>
                               </>
                             ) : (
                               <span className="text-slate-300">-</span>
@@ -437,9 +465,6 @@ const DashboardPage = () => {
                     </td>
                     <td className="border border-slate-200 px-3 py-2 text-center font-semibold bg-blue-50">
                       {group.billable.toLocaleString()}
-                    </td>
-                    <td className="border border-slate-200 px-3 py-2 text-center font-semibold bg-green-50">
-                      {group.inbound.toLocaleString()}
                     </td>
                   </tr>
                 ))}
@@ -459,9 +484,6 @@ const DashboardPage = () => {
                   </td>
                   <td className="border border-slate-200 px-3 py-2 text-center bg-blue-100">
                     {stats.totals.billable.toLocaleString()}
-                  </td>
-                  <td className="border border-slate-200 px-3 py-2 text-center bg-green-100">
-                    {stats.totals.inbound.toLocaleString()}
                   </td>
                 </tr>
               </tfoot>
@@ -486,15 +508,15 @@ const DashboardPage = () => {
       <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-100 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="font-semibold">روند درصد وضعیت تماس‌ها</h3>
+            <h3 className="font-semibold">روند وضعیت تماس‌ها</h3>
             <p className="text-sm text-slate-500">نمایش درصد سهم هر وضعیت ({trendModeLabel})</p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm items-center">
             <div className="flex items-center gap-1 bg-slate-100 rounded-full px-2 py-1 text-xs">
               {[
-                { key: 'hour6', label: '۶س' },
                 { key: 'hour24', label: '۲۴س' },
                 { key: 'day7', label: '۷روز' },
+                { key: 'day14', label: '۱۴روز' },
                 { key: 'day30', label: '۳۰روز' },
               ].map((item) => (
                 <button
@@ -524,6 +546,19 @@ const DashboardPage = () => {
                   </span>
                 </label>
               ))}
+            {/* BILLABLE virtual status */}
+            <label className="flex items-center gap-2 border border-blue-300 bg-blue-50 rounded-full px-3 py-1 cursor-pointer hover:bg-blue-100">
+              <input
+                type="checkbox"
+                checked={selectedStatuses.includes('BILLABLE')}
+                onChange={() => toggleStatusFilter('BILLABLE')}
+                className="w-3 h-3"
+              />
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: '#3b82f6' }}></span>
+                انجام شده
+              </span>
+            </label>
           </div>
         </div>
         <div>
@@ -548,9 +583,19 @@ const DashboardPage = () => {
                       label: (ctx) => {
                         const bucket = trend?.buckets[ctx.dataIndex]
                         const statusKey = (ctx.dataset as any).statusKey as string | undefined
+                        const total = bucket?.total_attempts ?? 0
+
+                        // Special handling for BILLABLE virtual status
+                        if (statusKey === 'BILLABLE') {
+                          const billableCount = BILLABLE_STATUSES.reduce((sum, billableStatus) => {
+                            const match = bucket?.status_counts.find((s) => s.status === billableStatus)
+                            return sum + (match ? match.count : 0)
+                          }, 0)
+                          return `${ctx.dataset.label}: ${ctx.parsed.y}% (${billableCount}/${total})`
+                        }
+
                         const match = statusKey ? bucket?.status_counts.find((s) => s.status === statusKey) : undefined
                         const count = match?.count ?? 0
-                        const total = bucket?.total_attempts ?? 0
                         return `${ctx.dataset.label}: ${ctx.parsed.y}% (${count}/${total})`
                       },
                     },

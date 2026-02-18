@@ -13,3 +13,5 @@ build/
 coverage/
 .pytest_cache/
 deploy/ansible/group_vars/prod.yml
+backend/.venv/
+backend/.env.backup

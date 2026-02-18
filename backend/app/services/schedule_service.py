@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from typing import Iterable
+import jdatetime
 
 from fastapi import HTTPException
 from sqlalchemy import delete, text, inspect
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
 from ..models.schedule import ScheduleConfig, ScheduleWindow
-from ..schemas.schedule import ScheduleConfigUpdate, ScheduleInterval
+from ..schemas.schedule import ScheduleConfigUpdate
 
 settings = get_settings()
 TEHRAN_TZ = ZoneInfo(settings.timezone)
@@ -190,8 +191,20 @@ def update_billing(db: Session, wallet_balance: int | None = None, cost_per_conn
 
 
 def is_holiday(date_value: datetime) -> bool:
-    # Placeholder: hook for Iranian holiday calendar integration
-    return False
+    """
+    Shared Iran holidays based on Jalali calendar (applies equally to all companies).
+    """
+    jalali = jdatetime.date.fromgregorian(date=date_value.astimezone(TEHRAN_TZ).date())
+    mm_dd = (jalali.month, jalali.day)
+    # Fixed Jalali public holidays (shared nationwide)
+    fixed_jalali_holidays = {
+        (1, 1), (1, 2), (1, 3), (1, 4),   # Nowruz
+        (1, 12), (1, 13),                 # Islamic Republic Day / Nature Day
+        (3, 14), (3, 15),                 # Khomeini death / 15 Khordad uprising
+        (11, 22),                         # Islamic Revolution Victory Day
+        (12, 29),                         # Oil nationalization day
+    }
+    return mm_dd in fixed_jalali_holidays
 
 
 def is_call_allowed(now: datetime | None, db: Session, company_id: int | None = None) -> tuple[bool, str | None, int]:
@@ -204,11 +217,11 @@ def is_call_allowed(now: datetime | None, db: Session, company_id: int | None = 
             config.version += 1
             db.commit()
             db.refresh(config)
-        return False, "insufficient_funds", settings.long_retry_seconds
+        return False, "insufficient_funds", settings.short_retry_seconds
     if not config.enabled:
-        return False, "disabled", settings.long_retry_seconds
+        return False, "disabled", settings.short_retry_seconds
     if config.skip_holidays and is_holiday(now):
-        return False, "holiday", settings.short_retry_seconds
+        return False, "holiday", settings.long_retry_seconds
 
     intervals = list_intervals(db, company_id=company_id)
     todays_intervals = [i for i in intervals if i.day_of_week == _iran_weekday(now)]
@@ -218,14 +231,8 @@ def is_call_allowed(now: datetime | None, db: Session, company_id: int | None = 
     for interval in todays_intervals:
         if interval.start_time <= current_time <= interval.end_time:
             return True, None, 0
-    # outside windows
-    next_start = _next_start(now, intervals)
-    if next_start:
-        delta = (next_start - now).total_seconds()
-        retry = max(settings.short_retry_seconds, int(delta))
-    else:
-        retry = settings.long_retry_seconds
-    return False, "outside_allowed_time_window", retry
+    # outside windows: fixed polling interval
+    return False, "outside_allowed_time_window", settings.long_retry_seconds
 
 
 def _next_start(now: datetime, intervals: Iterable[ScheduleWindow]) -> datetime | None:

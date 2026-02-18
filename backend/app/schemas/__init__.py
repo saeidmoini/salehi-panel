@@ -3,9 +3,14 @@ from .user import AdminUserCreate, AdminUserUpdate, AdminUserOut
 from .phone_number import PhoneNumberCreate, PhoneNumberOut, PhoneNumberStatusUpdate, PhoneNumberImportResponse
 from .schedule import ScheduleInterval, ScheduleConfigOut, ScheduleConfigUpdate
 from .dialer import NextBatchResponse, DialerReport, DialerBatchOut, ScenarioSimple
-from .company import CompanyCreate, CompanyUpdate, CompanyOut
+from .company import CompanyCreate, CompanyUpdate, CompanyOut, CompanyDeleteRequest
 from .scenario import ScenarioCreate, ScenarioUpdate, ScenarioOut, RegisterScenariosRequest
-from .outbound_line import OutboundLineCreate, OutboundLineUpdate, OutboundLineOut
+from .outbound_line import (
+    OutboundLineCreate,
+    OutboundLineUpdate,
+    OutboundLineOut,
+    RegisterOutboundLinesRequest,
+)
 
 __all__ = [
     "Token",
@@ -27,6 +32,7 @@ __all__ = [
     "CompanyCreate",
     "CompanyUpdate",
     "CompanyOut",
+    "CompanyDeleteRequest",
     "ScenarioCreate",
     "ScenarioUpdate",
     "ScenarioOut",
@@ -34,4 +40,5 @@ __all__ = [
     "OutboundLineCreate",
     "OutboundLineUpdate",
     "OutboundLineOut",
+    "RegisterOutboundLinesRequest",
 ]

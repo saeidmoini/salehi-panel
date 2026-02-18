@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 
@@ -36,7 +36,17 @@ class ScenarioSimple(BaseModel):
         from_attributes = True
 
 
+class RegisterScenarioItem(BaseModel):
+    """
+    Minimal scenario shape accepted from dialer startup registration.
+    Dialer must not control scenario activation state.
+    """
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., min_length=1, max_length=128)
+    display_name: str = Field(..., min_length=1, max_length=255)
+
+
 class RegisterScenariosRequest(BaseModel):
     """Request from dialer app to register available scenarios"""
     company: str
-    scenarios: list[ScenarioBase]
+    scenarios: list[RegisterScenarioItem]

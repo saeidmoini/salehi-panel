@@ -38,6 +38,7 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 
 ## Key Features
 - Admin authentication (JWT), user/agent CRUD, activate/deactivate, password hashing (bcrypt); agents only see their assigned numbers and only have the Numbers page
+- Admin users page is mobile-safe: users table supports horizontal scrolling on small screens
 - Call scheduling: weekday intervals (Saturday–Friday), skip-holidays flag, schedule versioning, service that answers `is_call_allowed`
 - Numbers management: add manually or CSV/XLSX import, dedupe, validation for Iranian mobile numbers, status updates, pagination/search
 - Bulk actions on numbers (select page, select all filtered across pages): change to any status, reset to queue, or delete (only for IN_QUEUE / MISSED / BUSY / POWER_OFF / BANNED)
@@ -45,7 +46,9 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - Dialer APIs protected by `DIALER_TOKEN`
 - Stats APIs for totals and reporting: number status distribution and daily call-attempt percentages
 - Single global switch (`enabled`/`call_allowed`) controls whether numbers are dispatched to the dialer; can be toggled from the UI or by the dialer via result reporting
- - Date range and agent-aware search in numbers list (filter by created_at, search by phone/agent name/username/phone)
+- Date range and agent-aware search in numbers list (filter by created_at, search by phone/agent name/username/phone)
+- Super-admin company switcher uses a dropdown on mobile (instead of horizontal chips) to prevent page overflow
+- Outbound lines are registered by the call center; panel page is for viewing/manage state (activate/deactivate/delete), not manual line creation
 
 ## Dialer API (scheduling enforced)
 - `GET /api/dialer/next-batch?size=100`
@@ -57,7 +60,7 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
       "server_time": "...",
       "schedule_version": 3,
       "reason": "outside_allowed_time_window",
-      "retry_after_seconds": 600
+      "retry_after_seconds": 900
     }
     ```
   - If allowed, returns and locks `IN_QUEUE` numbers:
@@ -78,7 +81,10 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
       }
     }
   ```
-  - Reasons may be `disabled`, `holiday`, `no_window`, or `outside_allowed_time_window`; retry hints use `short_retry_seconds` (120s) or `long_retry_seconds` (900s) depending on schedule.
+  - Reasons may be `insufficient_funds`, `disabled`, `holiday`, `no_window`, or `outside_allowed_time_window`.
+  - Retry hints:
+    - `insufficient_funds` and `disabled` -> `short_retry_seconds` (300s)
+    - `holiday`, `no_window`, and `outside_allowed_time_window` -> `long_retry_seconds` (900s)
   - Dialer must obey `call_allowed` and back off using `retry_after_seconds`.
 - `POST /api/dialer/report-result`
   - Payload: `{ "number_id": 1, "phone_number": "0912...", "status": "CONNECTED" | "FAILED" | "NOT_INTERESTED" | "MISSED" | "HANGUP" | "DISCONNECTED" | "BUSY" | "POWER_OFF" | "BANNED" | "UNKNOWN", "reason": "optional", "attempted_at": "ISO8601", "call_allowed": false, "agent_id": 5, "agent_phone": "0912...", "user_message": "string" }`
@@ -102,7 +108,8 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 
 ## Scheduling
 - Intervals stored per weekday (Saturday=0 … Friday=6), evaluated in Tehran time.
-- `skip_holidays` flag is stored; holiday detection hook is stubbed for now. Default is taken from `.env` on first boot.
+- `skip_holidays` is a per-company toggle (on/off only).
+- Holiday dates are shared for all companies and checked against Iran's Jalali calendar holidays in backend logic.
 - Global enable/disable switch (`enabled`/`call_allowed`): when disabled, `/api/dialer/next-batch` returns `call_allowed=false` with reason `disabled` so no numbers reach the dialer. Dialer may also send `call_allowed=false` in report-result to turn it off remotely.
 - `schedule_version` increments on changes and is echoed in `/api/dialer/next-batch` responses.
 - Assigned numbers auto-unlock after `ASSIGNMENT_TIMEOUT_MINUTES` (default 60) if no result is reported, returning them to the queue.

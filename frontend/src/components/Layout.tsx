@@ -7,6 +7,7 @@ import client from '../api/client'
 interface CompanyOption {
   name: string
   display_name: string
+  is_active: boolean
 }
 
 interface NavItem {
@@ -35,22 +36,27 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   useEffect(() => {
     if (user?.is_superuser) {
       client.get<CompanyOption[]>('/api/companies/').then(({ data }) => {
-        setCompanies(data)
+        setCompanies(data.filter((c) => c.is_active))
       }).catch(() => {})
     }
   }, [user?.is_superuser])
 
   // Build nav items dynamically based on company context
-  const navItems: NavItem[] = company ? [
+  const companyNavItems: NavItem[] = company ? [
+    ...(user?.is_superuser ? [{ path: '/admin/companies', label: 'مدیریت شرکت‌ها', roles: ['ADMIN'] as Array<'ADMIN' | 'AGENT'>, superuserOnly: true }] : []),
     { path: `/${company.name}/dashboard`, label: 'داشبورد', roles: ['ADMIN'] },
     { path: `/${company.name}/numbers`, label: 'مدیریت شماره‌ها', roles: ['ADMIN', 'AGENT'] },
     { path: `/${company.name}/schedule`, label: 'زمان‌بندی تماس', roles: ['ADMIN'] },
-    { path: `/${company.name}/billing`, label: 'تنظیمات مالی', roles: ['ADMIN'] },
+    { path: `/${company.name}/billing`, label: 'تنظیمات مالی', roles: ['ADMIN'], superuserOnly: true },
     { path: `/${company.name}/admins`, label: 'مدیریت کاربران', roles: ['ADMIN'] },
     { path: `/${company.name}/scenarios`, label: 'سناریوها', roles: ['ADMIN'] },
     { path: `/${company.name}/outbound-lines`, label: 'خطوط خروجی', roles: ['ADMIN'], superuserOnly: true },
     { path: `/${company.name}/profile`, label: 'حساب کاربری', roles: ['ADMIN', 'AGENT'] },
   ] : []
+
+  const navItems: NavItem[] = company
+    ? companyNavItems
+    : (user?.is_superuser ? [{ path: '/admin/companies', label: 'مدیریت شرکت‌ها', roles: ['ADMIN'], superuserOnly: true }] : [])
 
   const availableNav = navItems.filter((item) => {
     if (item.superuserOnly && !user?.is_superuser) return false
@@ -60,6 +66,12 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const handleLogout = () => {
     logout()
     navigate('/login')
+  }
+
+  const switchCompany = (nextCompanyName: string) => {
+    if (!company || nextCompanyName === company.name) return
+    const currentPath = location.pathname.replace(`/${company.name}`, `/${nextCompanyName}`)
+    navigate(currentPath)
   }
 
   return (
@@ -106,29 +118,41 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               {company ? company.display_name : 'پنل مدیریت'}
             </div>
           </div>
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-3 text-sm min-w-0">
             <div>{user?.username}</div>
             {/* Company switcher for super admin */}
-            {user?.is_superuser && company && companies.length > 1 && (
-              <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
-                {companies.map((c) => (
-                  <button
-                    key={c.name}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                      c.name === company!.name
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                    onClick={() => {
-                      if (c.name !== company!.name) {
-                        const currentPath = location.pathname.replace(`/${company!.name}`, `/${c.name}`)
-                        navigate(currentPath)
-                      }
-                    }}
-                  >
-                    {c.display_name}
-                  </button>
-                ))}
+            {user?.is_superuser && company && (
+              <div className="flex items-center gap-2">
+                {companies.length > 1 && (
+                  <>
+                    <select
+                      className="md:hidden rounded border border-slate-300 bg-white px-2 py-1 text-xs max-w-[140px]"
+                      value={company.name}
+                      onChange={(e) => switchCompany(e.target.value)}
+                    >
+                      {companies.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.display_name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="hidden md:flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+                      {companies.map((c) => (
+                        <button
+                          key={c.name}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            c.name === company.name
+                              ? 'bg-white text-slate-900 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                          onClick={() => switchCompany(c.name)}
+                        >
+                          {c.display_name}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
             <button onClick={handleLogout} className="rounded bg-slate-900 text-white px-3 py-1 text-xs">

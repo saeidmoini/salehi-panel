@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import client from '../api/client'
 import dayjs from 'dayjs'
 import { useAuth } from '../hooks/useAuth'
+import { useCompany } from '../hooks/useCompany'
 import DatePicker from 'react-multi-date-picker'
 import persian from 'react-date-object/calendars/persian'
 import persian_fa from 'react-date-object/locales/persian_fa'
@@ -10,6 +11,7 @@ import gregorian from 'react-date-object/calendars/gregorian'
 interface PhoneNumber {
   id: number
   phone_number: string
+  global_status: 'ACTIVE' | 'COMPLAINED' | 'POWER_OFF'
   status: string
   total_attempts: number
   last_attempt_at?: string
@@ -28,15 +30,29 @@ interface PhoneNumber {
 const statusLabels: Record<string, string> = {
   IN_QUEUE: 'در صف تماس',
   MISSED: 'از دست رفته',
-  CONNECTED: 'موفق',
+  CONNECTED: 'وصل شده',
   FAILED: 'خطا',
   NOT_INTERESTED: 'عدم نیاز کاربر',
-  HANGUP: 'قطع تماس توسط کاربر',
-  DISCONNECTED: 'ناموفق',
+  HANGUP: 'قطع شده',
+  DISCONNECTED: 'وصل نشده',
   BUSY: 'مشغول',
   POWER_OFF: 'خاموش',
   BANNED: 'بن شده',
   UNKNOWN: 'نامشخص',
+  INBOUND_CALL: 'تماس ورودی',
+  COMPLAINED: 'شکایت',
+}
+
+const globalStatusLabels: Record<string, string> = {
+  ACTIVE: 'فعال',
+  POWER_OFF: 'خاموش (گلوبال)',
+  COMPLAINED: 'شکایت (گلوبال)',
+}
+
+const globalStatusColors: Record<string, string> = {
+  ACTIVE: 'bg-emerald-100 text-emerald-800',
+  POWER_OFF: 'bg-slate-100 text-slate-700',
+  COMPLAINED: 'bg-pink-100 text-pink-800',
 }
 
 const statusColors: Record<string, string> = {
@@ -51,16 +67,20 @@ const statusColors: Record<string, string> = {
   POWER_OFF: 'bg-slate-100 text-slate-700',
   BANNED: 'bg-rose-100 text-rose-700',
   UNKNOWN: 'bg-blue-100 text-blue-800',
+  INBOUND_CALL: 'bg-sky-100 text-sky-800',
+  COMPLAINED: 'bg-pink-100 text-pink-800',
 }
 
 const modifiableStatuses = ['IN_QUEUE', 'MISSED', 'BUSY', 'POWER_OFF', 'BANNED']
 
 const NumbersPage = () => {
   const { user } = useAuth()
+  const { company } = useCompany()
   const isAdmin = user?.role === 'ADMIN'
   const isSuper = !!user?.is_superuser
   const [numbers, setNumbers] = useState<PhoneNumber[]>([])
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [globalStatusFilter, setGlobalStatusFilter] = useState<string>('')
   const [search, setSearch] = useState('')
   const [startDateValue, setStartDateValue] = useState<any>(null)
   const [endDateValue, setEndDateValue] = useState<any>(null)
@@ -85,8 +105,10 @@ const NumbersPage = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [exporting, setExporting] = useState(false)
 
-  const canModifyStatus = (status: string) => isSuper || modifiableStatuses.includes(status)
-  const isRowSelectable = (n: PhoneNumber) => canModifyStatus(n.status)
+  // null/undefined status means number has never been called → treat as IN_QUEUE (modifiable)
+  const canModifyStatus = (status: string | null | undefined) =>
+    isAdmin && (isSuper || !status || modifiableStatuses.includes(status))
+  const isRowSelectable = (n: PhoneNumber) => isAdmin && canModifyStatus(n.status)
   const handleStartDateChange = (value: any) => {
     if (!value) {
       setStartDateValue(null)
@@ -119,27 +141,36 @@ const NumbersPage = () => {
 
   const fetchNumbers = async () => {
     setLoading(true)
-    const { data } = await client.get<PhoneNumber[]>('/api/numbers', {
-      params: {
-        status: statusFilter || undefined,
-        search: search || undefined,
-        start_date: startDateIso,
-        end_date: endDateIso,
-        skip: page * pageSize,
-        limit: pageSize,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-      },
-    })
-    setNumbers(data)
-    setHasMore(data.length === pageSize)
-    setLoading(false)
+    try {
+      const { data } = await client.get<PhoneNumber[]>('/api/numbers', {
+        params: {
+          company: company?.name || undefined,
+          status: statusFilter || undefined,
+          global_status: globalStatusFilter || undefined,
+          search: search || undefined,
+          start_date: startDateIso,
+          end_date: endDateIso,
+          skip: page * pageSize,
+          limit: pageSize,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+        },
+      })
+      setNumbers(data)
+      setHasMore(data.length === pageSize)
+    } catch (err: any) {
+      console.error('fetchNumbers error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const fetchStats = async () => {
     const { data } = await client.get<{ total: number }>('/api/numbers/stats', {
       params: {
+        company: company?.name || undefined,
         status: statusFilter || undefined,
+        global_status: globalStatusFilter || undefined,
         search: search || undefined,
         start_date: startDateIso,
         end_date: endDateIso,
@@ -151,7 +182,7 @@ const NumbersPage = () => {
   useEffect(() => {
     fetchNumbers()
     fetchStats()
-  }, [page, statusFilter, search, sortBy, sortOrder, startDateIso, endDateIso])
+  }, [company?.name, page, statusFilter, globalStatusFilter, search, sortBy, sortOrder, startDateIso, endDateIso])
 
   const clearSelection = () => {
     setSelectedIds(new Set())
@@ -171,18 +202,22 @@ const NumbersPage = () => {
   }
 
   const updateStatus = async (id: number, status: string) => {
+    if (!isAdmin) return
     const target = numbers.find((n) => n.id === id)
     if (target && !canModifyStatus(target.status)) return
-    await client.put(`/api/numbers/${id}/status`, { status })
+    await client.put(`/api/numbers/${id}/status`, { status }, {
+      params: { company: company?.name || undefined }
+    })
     fetchNumbers()
   }
 
   const deleteNumber = async (id: number) => {
+    if (!isAdmin) return
     const target = numbers.find((n) => n.id === id)
     if (target && !canModifyStatus(target.status)) return
     const ok = window.confirm('این شماره حذف شود؟')
     if (!ok) return
-    await client.delete(`/api/numbers/${id}`)
+    await client.delete(`/api/numbers/${id}`, { params: { company: company?.name || undefined } })
     setNumbers((prev) => prev.filter((n) => n.id !== id))
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -198,9 +233,10 @@ const NumbersPage = () => {
   }
 
   const resetNumber = async (id: number) => {
+    if (!isAdmin) return
     const target = numbers.find((n) => n.id === id)
     if (target && !canModifyStatus(target.status)) return
-    await client.post(`/api/numbers/${id}/reset`)
+    await client.post(`/api/numbers/${id}/reset`, null, { params: { company: company?.name || undefined } })
     fetchNumbers()
   }
 
@@ -234,6 +270,7 @@ const NumbersPage = () => {
   }
 
   const toggleRow = (id: number) => {
+    if (!isAdmin) return
     const target = numbers.find((n) => n.id === id)
     if (target && !isRowSelectable(target)) return
     if (selectAll) {
@@ -264,6 +301,7 @@ const NumbersPage = () => {
   )
 
   const toggleCurrentPage = () => {
+    if (!isAdmin) return
     if (selectAll) {
       const next = new Set(excludedIds)
       numbers.forEach((n) => {
@@ -290,6 +328,7 @@ const NumbersPage = () => {
   }
 
   const handleBulk = async () => {
+    if (!isAdmin) return
     const ids = selectAll ? [] : Array.from(selectedIds)
     const excluded_ids = selectAll ? Array.from(excludedIds) : []
     if (!selectAll && ids.length === 0) {
@@ -321,11 +360,13 @@ const NumbersPage = () => {
       select_all: selectAll,
       excluded_ids,
       filter_status: statusFilter || undefined,
+      filter_global_status: globalStatusFilter || undefined,
       search: search || undefined,
       start_date: startDateIso,
       end_date: endDateIso,
       sort_by: sortBy,
       sort_order: sortOrder,
+      company_name: company?.name || undefined,
     }
     if (bulkAction === 'update_status') {
       payload.status = bulkStatus
@@ -337,6 +378,7 @@ const NumbersPage = () => {
   }
 
   const handleExport = async () => {
+    if (!isAdmin) return
     const ids = selectAll ? [] : Array.from(selectedIds)
     const excluded_ids = selectAll ? Array.from(excludedIds) : []
     if (!selectAll && ids.length === 0) {
@@ -350,11 +392,13 @@ const NumbersPage = () => {
         select_all: selectAll,
         excluded_ids,
         filter_status: statusFilter || undefined,
+        filter_global_status: globalStatusFilter || undefined,
         search: search || undefined,
         start_date: startDateIso,
         end_date: endDateIso,
         sort_by: sortBy,
         sort_order: sortOrder,
+        company_name: company?.name || undefined,
       }
       const response = await client.post('/api/numbers/export', payload, { responseType: 'blob' })
       const url = window.URL.createObjectURL(new Blob([response.data]))
@@ -436,6 +480,22 @@ const NumbersPage = () => {
               </option>
             ))}
           </select>
+          <select
+            className="rounded border border-slate-200 px-2 py-1 text-sm"
+            value={globalStatusFilter}
+            onChange={(e) => {
+              setPage(0)
+              clearSelection()
+              setGlobalStatusFilter(e.target.value)
+            }}
+          >
+            <option value="">همه وضعیت‌های گلوبال</option>
+            {Object.entries(globalStatusLabels).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
           <input
             value={search}
             onChange={(e) => {
@@ -469,71 +529,75 @@ const NumbersPage = () => {
           <button onClick={() => { setPage(0); fetchNumbers(); fetchStats(); }} className="rounded bg-slate-900 text-white px-3 py-1 text-sm">
             بروزرسانی
           </button>
-          <div className="flex items-center gap-2 text-xs text-slate-600">
-            <span>انتخاب شده: {selectedCount}</span>
-            <button
-              className="rounded border border-slate-200 px-2 py-1 text-[11px]"
-              onClick={() => {
-                setSelectAll(true)
-                setSelectedIds(new Set())
-                setExcludedIds(new Set())
-              }}
-              disabled={totalCount === 0}
-            >
-              انتخاب همه نتایج
-            </button>
-            <button
-              className="rounded border border-slate-200 px-2 py-1 text-[11px]"
-              onClick={clearSelection}
-              disabled={selectedCount === 0 && !selectAll}
-            >
-              لغو انتخاب
-            </button>
-          </div>
+          {isAdmin && (
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <span>انتخاب شده: {selectedCount}</span>
+              <button
+                className="rounded border border-slate-200 px-2 py-1 text-[11px]"
+                onClick={() => {
+                  setSelectAll(true)
+                  setSelectedIds(new Set())
+                  setExcludedIds(new Set())
+                }}
+                disabled={totalCount === 0}
+              >
+                انتخاب همه نتایج
+              </button>
+              <button
+                className="rounded border border-slate-200 px-2 py-1 text-[11px]"
+                onClick={clearSelection}
+                disabled={selectedCount === 0 && !selectAll}
+              >
+                لغو انتخاب
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <div className="flex flex-wrap items-center gap-2 w-full">
-            <label className="text-xs text-slate-600 whitespace-nowrap">عملیات گروهی</label>
-            <select
-              className="rounded border border-slate-200 px-2 py-1 text-sm w-full sm:w-auto"
-              value={bulkAction}
-              onChange={(e) => setBulkAction(e.target.value as any)}
-            >
-              <option value="update_status">تغییر وضعیت</option>
-              <option value="reset">ریست (برگشت به صف)</option>
-              <option value="delete">حذف</option>
-            </select>
-            {bulkAction === 'update_status' && (
+          {isAdmin && (
+            <div className="flex flex-wrap items-center gap-2 w-full">
+              <label className="text-xs text-slate-600 whitespace-nowrap">عملیات گروهی</label>
               <select
                 className="rounded border border-slate-200 px-2 py-1 text-sm w-full sm:w-auto"
-                value={bulkStatus}
-                onChange={(e) => setBulkStatus(e.target.value)}
+                value={bulkAction}
+                onChange={(e) => setBulkAction(e.target.value as any)}
               >
-                {Object.entries(statusLabels).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
+                <option value="update_status">تغییر وضعیت</option>
+                <option value="reset">ریست (برگشت به صف)</option>
+                <option value="delete">حذف</option>
               </select>
-            )}
-            <button
-              className="rounded bg-brand-500 text-white px-3 py-1 text-sm disabled:opacity-50 w-full sm:w-auto"
-              disabled={!canBulk}
-              onClick={handleBulk}
-            >
-              اعمال
-            </button>
-            <button
-              className="rounded border border-slate-200 px-3 py-1 text-sm disabled:opacity-50 w-full sm:w-auto"
-              disabled={!canExport || exporting}
-              onClick={handleExport}
-            >
-              {exporting ? 'در حال آماده‌سازی...' : 'خروجی اکسل'}
-            </button>
-            <div className="text-[11px] text-slate-500 w-full">
-              عملیات فقط روی وضعیت‌های در صف، از دست رفته، مشغول، خاموش و بن‌شده انجام می‌شود.
+              {bulkAction === 'update_status' && (
+                <select
+                  className="rounded border border-slate-200 px-2 py-1 text-sm w-full sm:w-auto"
+                  value={bulkStatus}
+                  onChange={(e) => setBulkStatus(e.target.value)}
+                >
+                  {Object.entries(statusLabels).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                className="rounded bg-brand-500 text-white px-3 py-1 text-sm disabled:opacity-50 w-full sm:w-auto"
+                disabled={!canBulk}
+                onClick={handleBulk}
+              >
+                اعمال
+              </button>
+              <button
+                className="rounded border border-slate-200 px-3 py-1 text-sm disabled:opacity-50 w-full sm:w-auto"
+                disabled={!canExport || exporting}
+                onClick={handleExport}
+              >
+                {exporting ? 'در حال آماده‌سازی...' : 'خروجی اکسل'}
+              </button>
+              <div className="text-[11px] text-slate-500 w-full">
+                عملیات فقط روی وضعیت‌های در صف، از دست رفته، مشغول، خاموش و بن‌شده انجام می‌شود.
+              </div>
             </div>
-          </div>
+          )}
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-xs text-slate-600">صفحه {page + 1}</span>
             <button
@@ -560,9 +624,12 @@ const NumbersPage = () => {
               <thead>
                 <tr className="text-slate-500">
                   <th className="py-2 text-right w-10 whitespace-nowrap">
-                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleCurrentPage} />
+                    {isAdmin ? (
+                      <input type="checkbox" checked={allVisibleSelected} onChange={toggleCurrentPage} />
+                    ) : null}
                   </th>
                   <th className="py-2 text-right whitespace-nowrap">شماره</th>
+                  <th className="text-right whitespace-nowrap">وضعیت گلوبال</th>
                   <th className="text-right cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('status')}>
                     وضعیت {sortBy === 'status' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
@@ -579,20 +646,29 @@ const NumbersPage = () => {
                 {numbers.map((n) => (
                   <tr key={n.id} className="border-t">
                     <td className="py-2 text-right">
-                      <input
-                        type="checkbox"
-                        checked={isRowSelectable(n) && isRowSelected(n.id)}
-                        onChange={() => toggleRow(n.id)}
-                        disabled={!isRowSelectable(n)}
-                        title={!isRowSelectable(n) && !isSuper ? 'این وضعیت قابل تغییر یا حذف نیست' : ''}
-                      />
+                      {isAdmin ? (
+                        <input
+                          type="checkbox"
+                          checked={isRowSelectable(n) && isRowSelected(n.id)}
+                          onChange={() => toggleRow(n.id)}
+                          disabled={!isRowSelectable(n)}
+                          title={!isRowSelectable(n) && !isSuper ? 'این وضعیت قابل تغییر یا حذف نیست' : ''}
+                        />
+                      ) : null}
                     </td>
                     <td className="py-2 font-mono text-xs whitespace-nowrap">{n.phone_number}</td>
                     <td className="text-right whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColors[n.status] || 'bg-slate-100 text-slate-700'}`}
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${globalStatusColors[n.global_status] || 'bg-slate-100 text-slate-700'}`}
                       >
-                        {statusLabels[n.status] || n.status}
+                        {globalStatusLabels[n.global_status] || n.global_status}
+                      </span>
+                    </td>
+                    <td className="text-right whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColors[n.status || 'IN_QUEUE'] || 'bg-slate-100 text-slate-700'}`}
+                      >
+                        {statusLabels[n.status || 'IN_QUEUE'] || n.status}
                       </span>
                     </td>
                     <td className="text-right whitespace-nowrap">{n.total_attempts}</td>
@@ -620,36 +696,40 @@ const NumbersPage = () => {
                       </div>
                     </td>
                     <td className="text-right w-52 whitespace-nowrap">
-                      <div className="flex items-center justify-start gap-2">
-                        <select
-                          className="rounded border border-slate-200 px-2 py-1 text-xs w-28"
-                          value={n.status}
-                          onChange={(e) => updateStatus(n.id, e.target.value)}
-                          disabled={!canModifyStatus(n.status)}
-                        >
-                          {Object.keys(statusLabels).map((key) => (
-                            <option key={key} value={key}>
-                              {statusLabels[key]}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="text-xs text-amber-700 ml-2"
-                          onClick={() => resetNumber(n.id)}
-                          title="بازگشت به صف"
-                          disabled={!canModifyStatus(n.status)}
-                        >
-                          ریست
-                        </button>
-                        <button
-                          className="text-xs text-red-600"
-                          onClick={() => deleteNumber(n.id)}
-                          title="حذف شماره"
-                          disabled={!canModifyStatus(n.status)}
-                        >
-                          حذف
-                        </button>
-                      </div>
+                      {isAdmin ? (
+                        <div className="flex items-center justify-start gap-2">
+                          <select
+                            className="rounded border border-slate-200 px-2 py-1 text-xs w-28"
+                            value={n.status || 'IN_QUEUE'}
+                            onChange={(e) => updateStatus(n.id, e.target.value)}
+                            disabled={!canModifyStatus(n.status)}
+                          >
+                            {Object.keys(statusLabels).map((key) => (
+                              <option key={key} value={key}>
+                                {statusLabels[key]}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="text-xs text-amber-700 ml-2"
+                            onClick={() => resetNumber(n.id)}
+                            title="بازگشت به صف"
+                            disabled={!canModifyStatus(n.status)}
+                          >
+                            ریست
+                          </button>
+                          <button
+                            className="text-xs text-red-600"
+                            onClick={() => deleteNumber(n.id)}
+                            title="حذف شماره"
+                            disabled={!canModifyStatus(n.status)}
+                          >
+                            حذف
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}

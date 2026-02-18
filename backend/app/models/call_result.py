@@ -23,7 +23,6 @@ class CallResult(Base):
         nullable=True,
     )
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     phone_number = relationship("PhoneNumber")

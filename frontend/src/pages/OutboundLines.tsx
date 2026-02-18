@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useCompany } from '../hooks/useCompany'
 import client from '../api/client'
 
@@ -14,12 +14,6 @@ const OutboundLinesPage = () => {
   const { company } = useCompany()
   const [lines, setLines] = useState<OutboundLine[]>([])
   const [loading, setLoading] = useState(false)
-  const [showForm, setShowForm] = useState(false)
-
-  // Form state
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [isActive, setIsActive] = useState(true)
 
   useEffect(() => {
     if (company) {
@@ -37,26 +31,6 @@ const OutboundLinesPage = () => {
       console.error('Failed to fetch outbound lines', error)
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!company) return
-    try {
-      await client.post(`/api/${company.name}/outbound-lines`, {
-        phone_number: phoneNumber,
-        display_name: displayName,
-        is_active: isActive
-      })
-      setPhoneNumber('')
-      setDisplayName('')
-      setIsActive(true)
-      setShowForm(false)
-      fetchLines()
-    } catch (error) {
-      console.error('Failed to create outbound line', error)
-      alert('خطا در ایجاد خط خروجی')
     }
   }
 
@@ -102,55 +76,7 @@ const OutboundLinesPage = () => {
             خطوط تلفن خروجی برای شرکت {company?.display_name}
           </p>
         </div>
-        <button
-          className="rounded bg-brand-500 text-white px-4 py-2 text-sm hover:bg-brand-600"
-          onClick={() => setShowForm(!showForm)}
-        >
-          {showForm ? 'انصراف' : '+ افزودن خط جدید'}
-        </button>
       </div>
-
-      {showForm && (
-        <div className="bg-white rounded-xl border border-slate-100 p-6 shadow-sm">
-          <h2 className="font-semibold mb-4">افزودن خط خروجی جدید</h2>
-          <form className="grid gap-4 md:grid-cols-3 items-end" onSubmit={handleSubmit}>
-            <div>
-              <label className="text-sm text-slate-600">شماره تلفن</label>
-              <input
-                className="w-full rounded border border-slate-200 px-3 py-2 text-sm mt-1"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                placeholder="مثال: 02188776655"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm text-slate-600">نام نمایشی</label>
-              <input
-                className="w-full rounded border border-slate-200 px-3 py-2 text-sm mt-1"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="مثال: خط اصلی دفتر"
-                required
-              />
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isActive}
-                onChange={(e) => setIsActive(e.target.checked)}
-              />
-              <span>فعال باشد</span>
-            </div>
-            <button
-              type="submit"
-              className="rounded bg-brand-500 text-white px-4 py-2 text-sm md:col-span-3 w-full md:w-auto hover:bg-brand-600"
-            >
-              ذخیره خط جدید
-            </button>
-          </form>
-        </div>
-      )}
 
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm">
         <div className="overflow-x-auto">
@@ -214,7 +140,7 @@ const OutboundLinesPage = () => {
         {lines.length === 0 && (
           <div className="py-12 text-center">
             <p className="text-slate-500">
-              هیچ خط خروجی یافت نشد. برای شروع یک خط جدید اضافه کنید.
+              هیچ خط خروجی ثبت نشده است. ثبت خطوط توسط مرکز تماس انجام می‌شود.
             </p>
           </div>
         )}

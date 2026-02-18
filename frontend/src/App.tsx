@@ -34,15 +34,15 @@ const App = () => {
         {/* Company-scoped routes */}
         <Route path="/:companySlug/*" element={
           <CompanyProvider>
-            <ProtectedRoute allowedRoles={['ADMIN']}>
+            <ProtectedRoute allowedRoles={['ADMIN', 'AGENT']}>
               <Layout>
                 <Routes>
-                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="dashboard" element={<ProtectedRoute allowedRoles={['ADMIN']}><DashboardPage /></ProtectedRoute>} />
                   <Route path="numbers" element={<NumbersPage />} />
-                  <Route path="schedule" element={<SchedulePage />} />
-                  <Route path="billing" element={<BillingPage />} />
-                  <Route path="admins" element={<AdminUsersPage />} />
-                  <Route path="scenarios" element={<ScenariosPage />} />
+                  <Route path="schedule" element={<ProtectedRoute allowedRoles={['ADMIN']}><SchedulePage /></ProtectedRoute>} />
+                  <Route path="billing" element={<ProtectedRoute requireSuperuser><BillingPage /></ProtectedRoute>} />
+                  <Route path="admins" element={<ProtectedRoute allowedRoles={['ADMIN']}><AdminUsersPage /></ProtectedRoute>} />
+                  <Route path="scenarios" element={<ProtectedRoute allowedRoles={['ADMIN']}><ScenariosPage /></ProtectedRoute>} />
                   <Route path="outbound-lines" element={<ProtectedRoute requireSuperuser><OutboundLinesPage /></ProtectedRoute>} />
                   <Route path="profile" element={<ProfilePage />} />
                 </Routes>

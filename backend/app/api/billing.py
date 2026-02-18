@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from ..api.deps import get_active_admin, get_superuser, get_company, get_company_user
+from ..api.deps import get_superuser, get_company
 from ..core.db import get_db
 from ..schemas.billing import BillingInfo, BillingUpdate
 from ..services import schedule_service
@@ -11,10 +11,10 @@ from ..models.user import AdminUser
 router = APIRouter()
 
 
-@router.get("/{company_name}/billing", response_model=BillingInfo, dependencies=[Depends(get_active_admin)])
+@router.get("/{company_name}/billing", response_model=BillingInfo, dependencies=[Depends(get_superuser)])
 def get_billing(
     company: Company = Depends(get_company),
-    user: AdminUser = Depends(get_company_user),
+    user: AdminUser = Depends(get_superuser),
     db: Session = Depends(get_db),
 ):
     """Get company billing information"""

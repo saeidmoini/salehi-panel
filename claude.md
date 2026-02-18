@@ -8,7 +8,7 @@ This document provides comprehensive context about the Salehi Dialer Admin Panel
 
 **Salehi Dialer Admin Panel** is a production-grade call center management system for outbound dialing campaigns in Persian/Iranian call centers. It manages phone number queues, call scheduling, user/agent management, and provides APIs for external dialer system integration.
 
-**Current Status:** Production-ready, actively deployed on two branches (agrad/salehi)
+**Current Status:** Multi-company architecture fully implemented and deployed on `salehi` branch (local). Companies: salehi (company_id=1), saeid (company_id=2), agrad (company_id=3).
 
 **Total Codebase:** ~4,100 lines of application code (excluding tests, configs, dependencies)
 
@@ -74,17 +74,20 @@ salehi-panel/
 │   │   │   ├── config.py          # Settings from .env
 │   │   │   ├── database.py        # SQLAlchemy setup
 │   │   │   └── security.py        # JWT, bcrypt
-│   │   ├── models/                 # SQLAlchemy ORM (153 lines)
-│   │   │   ├── admin_user.py
-│   │   │   ├── phone_number.py
-│   │   │   ├── call_attempt.py
-│   │   │   ├── schedule_config.py
-│   │   │   ├── schedule_window.py
+│   │   ├── models/                 # SQLAlchemy ORM
+│   │   │   ├── user.py            # AdminUser (with company_id, is_superuser)
+│   │   │   ├── phone_number.py    # PhoneNumber (numbers table), CallStatus, GlobalStatus
+│   │   │   ├── call_result.py     # CallResult (call_results table, per-company)
+│   │   │   ├── company.py         # Company
+│   │   │   ├── scenario.py        # Scenario (per-company)
+│   │   │   ├── outbound_line.py   # OutboundLine (per-company)
+│   │   │   ├── schedule_config.py # ScheduleConfig (per-company singleton)
+│   │   │   ├── schedule_window.py # ScheduleWindow
 │   │   │   └── dialer_batch.py
-│   │   ├── schemas/                # Pydantic models (273 lines)
+│   │   ├── schemas/                # Pydantic models
 │   │   │   ├── auth.py
 │   │   │   ├── admin.py
-│   │   │   ├── phone.py
+│   │   │   ├── phone_number.py    # PhoneNumberOut has virtual fields populated from call_results
 │   │   │   ├── schedule.py
 │   │   │   ├── dialer.py
 │   │   │   └── stats.py
@@ -191,65 +194,56 @@ User and agent management table.
 - One-to-many with PhoneNumber (assigned_agent_id)
 - One-to-many with CallAttempt (agent_id)
 
-#### 2. phone_numbers
-Call queue and number tracking.
+#### 2. numbers (formerly phone_numbers) — SHARED across all companies
 
 **Fields:**
 - `id` (Integer, PK, auto-increment)
 - `phone_number` (String, unique, not null) - Iranian format 09xxxxxxxxx
-- `status` (Enum: CallStatus, default IN_QUEUE)
-- `total_attempts` (Integer, default 0)
-- `last_attempt_at` (DateTime, nullable, timezone-aware)
-- `last_status_change_at` (DateTime, nullable, timezone-aware)
-- `assigned_at` (DateTime, nullable, timezone-aware) - when sent to dialer
+- `global_status` (Enum: GlobalStatus, default ACTIVE) - affects ALL companies
+- `last_called_at` (DateTime, nullable) - global cooldown timestamp
+- `last_called_company_id` (Integer, FK to companies, nullable)
+- `assigned_at` (DateTime, nullable) - when sent to dialer batch
 - `assigned_batch_id` (String, nullable) - UUID for audit
-- `note` (Text, nullable) - admin notes
-- `last_user_message` (Text, nullable) - latest customer feedback
-- `assigned_agent_id` (Integer, FK to admin_users, nullable)
-- `created_at` (DateTime, timezone-aware)
-- `updated_at` (DateTime, timezone-aware)
 
-**Indexes:**
-- phone_number (unique)
-- status
-- assigned_agent_id
+**No per-company fields** — status, attempts, agent are in `call_results`.
 
-**CallStatus Enum:**
-- `IN_QUEUE` - waiting to be called
-- `MISSED` - no answer
-- `CONNECTED` - successful call
-- `FAILED` - call failed
-- `NOT_INTERESTED` - customer not interested
-- `HANGUP` - customer hung up
-- `DISCONNECTED` - line disconnected
-- `BUSY` - line busy
-- `POWER_OFF` - phone powered off
-- `BANNED` - number blacklisted
-- `UNKNOWN` - unknown outcome
+**GlobalStatus Enum:**
+- `ACTIVE` - callable by any company (subject to per-company dedup)
+- `POWER_OFF` - globally blocked (phone off)
+- `COMPLAINED` - globally blocked (complaint registered)
 
-**Status Mutability Rules:**
-- **Mutable** (can be changed/deleted by admins): IN_QUEUE, MISSED, BUSY, POWER_OFF, BANNED
-- **Immutable** (locked once set): CONNECTED, FAILED, NOT_INTERESTED, HANGUP, DISCONNECTED, UNKNOWN
+**CallStatus Enum** (stored in call_results, not numbers):
+- `IN_QUEUE` - no call_result exists for this company (virtual default)
+- `MISSED`, `CONNECTED`, `FAILED`, `NOT_INTERESTED`, `HANGUP`
+- `DISCONNECTED`, `BUSY`, `POWER_OFF`, `BANNED`, `UNKNOWN`
+- `INBOUND_CALL`, `COMPLAINED`
+
+**Status Mutability Rules (applied to call_results status):**
+- **Mutable**: IN_QUEUE, MISSED, BUSY, POWER_OFF, BANNED
+- **Immutable**: CONNECTED, FAILED, NOT_INTERESTED, HANGUP, DISCONNECTED, UNKNOWN
 - Superusers bypass these restrictions
 
-#### 3. call_attempts
-Call history audit log.
+#### 3. call_results (formerly call_attempts) — per-company call history
 
 **Fields:**
-- `id` (Integer, PK, auto-increment)
-- `phone_number_id` (Integer, FK to phone_numbers, not null)
-- `status` (Enum: CallStatus, not null)
-- `reason` (Text, nullable) - why call ended this way
-- `user_message` (Text, nullable) - customer feedback
+- `id` (Integer, PK, auto-increment) — **use max(id) to find latest row, NOT max(attempted_at)**
+- `phone_number_id` (Integer, FK to numbers, not null)
+- `company_id` (Integer, FK to companies, not null)
+- `scenario_id` (Integer, FK to scenarios, nullable)
+- `outbound_line_id` (Integer, FK to outbound_lines, nullable)
+- `status` (String: CallStatus, not null)
+- `reason` (String, nullable)
+- `user_message` (String, nullable) - customer feedback
 - `agent_id` (Integer, FK to admin_users, nullable)
 - `attempted_at` (DateTime, not null, timezone-aware)
-- `created_at` (DateTime, timezone-aware)
 
 **Indexes:**
-- phone_number_id
-- agent_id
+- `(company_id, attempted_at)`
+- `(phone_number_id, company_id)`
+- `agent_id`
 
-**Purpose:** Immutable audit trail of every call attempt.
+**IMPORTANT:** Multiple rows can share the same `attempted_at` timestamp (migration artifact).
+Always use `max(id)` — NOT `max(attempted_at)` — to identify the latest call result.
 
 #### 4. schedule_configs
 Global scheduling settings (singleton pattern).
@@ -382,17 +376,17 @@ Delete user (cannot delete superuser).
 List numbers with filtering and pagination.
 
 **Query params:**
-- `status` - filter by CallStatus
-- `search` - search phone OR agent name/username/phone
-- `start_date` - filter created_at >= (ISO8601)
-- `end_date` - filter created_at <= (ISO8601)
-- `agent_id` - filter by assigned agent (admin only)
-- `sort_by` - created_at | last_attempt_at | status
+- `company` - company name (slug) for superusers to view another company's data
+- `status` - filter by CallStatus (applied per-company via call_results)
+- `search` - search phone number
+- `start_date` - filter last_called_at >= (ISO8601)
+- `end_date` - filter last_called_at <= (ISO8601)
+- `sort_by` - created_at | last_attempt_at | status (last two use call_results subquery)
 - `sort_order` - asc | desc
 - `skip` - pagination offset
 - `limit` - page size (default 50)
 
-**Agent restrictions:** Only see assigned numbers.
+**Company resolution:** If `company` param is given and user is superuser, data is shown for that company. Otherwise uses `current_user.company_id`.
 
 #### GET /api/numbers/stats
 Count total numbers for current filter.
@@ -445,8 +439,11 @@ Update single number status.
 - Admins: all numbers, mutable statuses only
 - Superusers: all numbers, all statuses
 
+#### GET /api/numbers/stats
+Count numbers matching filters. Accepts same `company` + `status` params as list endpoint.
+
 #### POST /api/numbers/{id}/reset
-Reset number to IN_QUEUE (clears attempts, timestamps).
+Reset number for this company: **deletes all call_results for this company** so dialer can re-call it. Also clears `assigned_at`/`assigned_batch_id`.
 
 #### DELETE /api/numbers/{id}
 Delete number (mutable statuses only, unless superuser).
@@ -646,23 +643,24 @@ Fetch next batch of numbers to call.
   "server_time": "2024-01-01T23:00:00+03:30",
   "schedule_version": 3,
   "reason": "outside_allowed_time_window",
-  "retry_after_seconds": 600
+  "retry_after_seconds": 900
 }
 ```
 
-**Reasons:** `disabled`, `holiday`, `no_window`, `outside_allowed_time_window`
+**Reasons:** `insufficient_funds`, `disabled`, `holiday`, `no_window`, `outside_allowed_time_window`
 
 **Retry hints:**
-- `short_retry_seconds`: 120s (temporary block)
-- `long_retry_seconds`: 900s (outside window)
+- `short_retry_seconds`: 300s (`insufficient_funds`, `disabled`)
+- `long_retry_seconds`: 900s (`holiday`, `no_window`, `outside_allowed_time_window`)
 
 **Batch assignment logic:**
 1. Check schedule (enabled, holidays, time windows)
 2. Unlock stale assignments (>60min timeout)
-3. SELECT FOR UPDATE SKIP LOCKED (concurrent-safe)
-4. Assign batch_id and timestamp
-5. Create DialerBatch audit record
-6. Return active agents roster
+3. Filter: `global_status=ACTIVE`, `assigned_at IS NULL`, `NOT EXISTS(call_results for this company)`, cooldown OK
+4. SELECT FOR UPDATE SKIP LOCKED (concurrent-safe) — uses NOT EXISTS (not LEFT JOIN) for PG compatibility
+5. Assign batch_id and timestamp
+6. Create DialerBatch audit record
+7. Return active agents roster
 
 #### POST /api/dialer/report-result
 Report call outcome.
@@ -762,7 +760,7 @@ def is_call_allowed(current_time: datetime) -> tuple[bool, str]:
     if not schedule_config.enabled:
         return False, "disabled"
 
-    # 2. Check holidays
+    # 2. Check shared Iran holidays (Jalali calendar)
     if schedule_config.skip_holidays and is_holiday(current_time):
         return False, "holiday"
 
@@ -784,8 +782,8 @@ def is_call_allowed(current_time: datetime) -> tuple[bool, str]:
 ```
 
 **Retry logic:**
-- If disabled/holiday/no_window → `long_retry_seconds` (900s)
-- If outside_allowed_time_window → calculate next window start
+- If insufficient_funds/disabled → `short_retry_seconds` (300s)
+- If holiday/no_window/outside_allowed_time_window → `long_retry_seconds` (900s)
 
 **Schedule version:**
 - Increments on any config/window change
@@ -1526,7 +1524,7 @@ curl http://localhost:8000/api/dialer/next-batch?size=10 \
 - **Default page size:** 50
 - **JWT expiry:** 1 day
 - **Assignment timeout:** 60 minutes
-- **Retry intervals:** 120s (short), 900s (long)
+- **Retry intervals:** 300s (short), 900s (long)
 
 ---
 
@@ -1540,6 +1538,193 @@ For questions or issues:
 
 ---
 
-**Last Updated:** 2026-01-04
-**Project Version:** Based on commit 003b580
-**Branch:** salehi (clean working tree)
+**Last Updated:** 2026-02-17
+**Branch:** salehi
+**Architecture:** Multi-company (migration 0004 applied). Numbers are shared globally, call data is per-company in `call_results`.
+---
+
+## Multi-Company Architecture (Migration 0004)
+
+### Overview
+The system supports multiple companies sharing a common pool of phone numbers, with company-specific call tracking and deduplication.
+
+### Database Schema
+
+#### `numbers` table (SHARED across all companies)
+```sql
+CREATE TABLE numbers (
+    id SERIAL PRIMARY KEY,
+    phone_number VARCHAR(32) UNIQUE NOT NULL,
+    global_status globalstatus NOT NULL DEFAULT 'ACTIVE',
+    last_called_at TIMESTAMP WITH TIME ZONE,
+    last_called_company_id INTEGER REFERENCES companies(id),
+    assigned_at TIMESTAMP WITH TIME ZONE,
+    assigned_batch_id VARCHAR(64)
+);
+```
+
+**Key points:**
+- **NO `company_id`** - numbers are shared globally
+- `global_status` = ACTIVE/POWER_OFF/COMPLAINED (affects ALL companies)
+- `last_called_at` = global cooldown timestamp (e.g., 3 days across all companies)
+- `last_called_company_id` = which company called it last
+- `assigned_at` + `assigned_batch_id` = temporary batch assignment
+
+#### `call_results` table (company-specific call history)
+```sql
+CREATE TABLE call_results (
+    id SERIAL PRIMARY KEY,
+    phone_number_id INTEGER REFERENCES numbers(id),
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    scenario_id INTEGER REFERENCES scenarios(id),
+    outbound_line_id INTEGER REFERENCES outbound_lines(id),
+    status VARCHAR(32),  -- CallStatus enum
+    reason VARCHAR(500),
+    user_message VARCHAR(1000),
+    agent_id INTEGER REFERENCES admin_users(id),
+    attempted_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX ix_call_results_company_attempted ON call_results(company_id, attempted_at);
+CREATE INDEX ix_call_results_phone_company ON call_results(phone_number_id, company_id);
+```
+
+**Key points:**
+- Every call belongs to one company (`company_id NOT NULL`)
+- Per-company deduplication via `(phone_number_id, company_id)` index
+- Per-company status tracking via `status` column
+
+### Batch Queue Logic
+
+**File:** `backend/app/services/dialer_service.py` → `fetch_next_batch()`
+
+```python
+# Global checks (apply to ALL companies):
+WHERE numbers.global_status = 'ACTIVE'              # No COMPLAINED/POWER_OFF
+  AND (numbers.last_called_at IS NULL 
+       OR numbers.last_called_at < NOW() - INTERVAL '3 days')  # Global cooldown
+
+# Per-company checks:
+  AND numbers.id NOT IN (
+      SELECT phone_number_id 
+      FROM call_results 
+      WHERE company_id = ?                           # Never called by THIS company
+  )
+  AND numbers.assigned_at IS NULL                   # Not in active batch
+```
+
+**What this achieves:**
+1. **Shared numbers**: All companies see same 1.96M number pool
+2. **Global cooldown**: If ANY company calls a number, NO company can call it for 3 days
+3. **Global blocks**: COMPLAINED/POWER_OFF blocks number for ALL companies
+4. **Per-company dedup**: Each company only gets numbers they've never called
+5. **Batch locking**: `assigned_at` prevents double-assignment during batching
+
+### Company-Specific Status View
+
+**Problem:** `numbers.status` is outdated/misleading for multi-company
+
+**Solution:** Calculate status per-company from latest `call_results`:
+
+```sql
+-- Get latest status for company X:
+SELECT COALESCE(
+    (SELECT status 
+     FROM call_results 
+     WHERE phone_number_id = numbers.id 
+       AND company_id = X 
+     ORDER BY attempted_at DESC 
+     LIMIT 1
+    ),
+    'IN_QUEUE'  -- Default if never called
+) AS status_for_company_x
+```
+
+**DONE:** `phone_service.list_numbers()` uses `_enrich_with_call_data()` to populate virtual fields (status, total_attempts, last_attempt_at, last_user_message, assigned_agent_id) from call_results per company.
+
+**CRITICAL:** Use `max(id)` NOT `max(attempted_at)` to identify the latest call_result — some rows share the same timestamp (migration artifact).
+
+### Key Tables
+
+#### `companies`
+```sql
+CREATE TABLE companies (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(64) UNIQUE NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    settings JSONB NOT NULL DEFAULT '{}'::jsonb,  -- {"cost_per_connected": 500}
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+```
+
+#### `scenarios`
+```sql
+CREATE TABLE scenarios (
+    id SERIAL PRIMARY KEY,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    name VARCHAR(128) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    UNIQUE(company_id, name)
+);
+```
+
+#### `outbound_lines`
+```sql
+CREATE TABLE outbound_lines (
+    id SERIAL PRIMARY KEY,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    phone_number VARCHAR(32) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    UNIQUE(company_id, phone_number)
+);
+```
+
+### Removed Fields (Cleanup)
+
+**From `numbers` table:**
+- ❌ `company_id` - numbers are shared, not owned
+- ❌ `status` - misleading, use call_results per-company
+- ❌ `total_attempts` - wrong, must count per-company
+- ❌ `last_attempt_at` - duplicate of `last_called_at`
+- ❌ `last_status_change_at` - unused
+- ❌ `created_at` - can use `id` for ordering
+- ❌ `updated_at` - unused
+- ❌ `note` - unused
+- ❌ `last_user_message` - unused
+- ❌ `assigned_agent_id` - old single-company feature
+
+**From `call_results` table:**
+- ❌ `created_at` - duplicate of `attempted_at`
+
+### Migration Notes
+
+**Production deployment:**
+1. Backup database: `pg_dump salehi_panel > backup.sql`
+2. Run migration: `alembic upgrade head`
+3. Create companies: `INSERT INTO companies (name, display_name) VALUES ('salehi', 'صالحی')`
+4. Create default scenario + outbound lines
+5. Assign existing users to company
+6. Assign existing call_results to company + scenario + outbound_line
+7. Update company settings: `{"cost_per_connected": 500}`
+
+**Batched updates for large tables (2M+ rows):**
+```sql
+-- Example: Assign call_results to scenario
+UPDATE call_results 
+SET scenario_id = 1 
+WHERE scenario_id IS NULL 
+  AND company_id = 1;
+
+-- Use MOD for outbound line distribution:
+UPDATE call_results
+SET outbound_line_id = ((id % 4) + 1)
+WHERE outbound_line_id IS NULL;
+```
+
+---

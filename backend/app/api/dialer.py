@@ -5,9 +5,11 @@ from ..api.deps import get_dialer_auth
 from ..core.db import get_db
 from ..schemas.dialer import NextBatchResponse, DialerReport
 from ..schemas.scenario import RegisterScenariosRequest
+from ..schemas.outbound_line import RegisterOutboundLinesRequest
 from ..services import dialer_service
 from ..models.company import Company
 from ..models.scenario import Scenario
+from ..models.outbound_line import OutboundLine
 
 router = APIRouter(dependencies=[Depends(get_dialer_auth)])
 
@@ -48,19 +50,89 @@ def register_scenarios(
     if not company_obj:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    for s in payload.scenarios:
-        existing = db.query(Scenario).filter(
-            Scenario.company_id == company_obj.id,
-            Scenario.name == s.name
-        ).first()
+    incoming = {item.name: item for item in payload.scenarios}
+    existing_rows = db.query(Scenario).filter(Scenario.company_id == company_obj.id).all()
+    existing_by_name = {row.name: row for row in existing_rows}
+
+    created = 0
+    updated = 0
+    deactivated = 0
+
+    for name, item in incoming.items():
+        existing = existing_by_name.get(name)
         if existing:
-            existing.display_name = s.display_name
+            if existing.display_name != item.display_name:
+                existing.display_name = item.display_name
+                updated += 1
         else:
             db.add(Scenario(
                 company_id=company_obj.id,
-                name=s.name,
-                display_name=s.display_name,
-                is_active=True
+                name=name,
+                display_name=item.display_name,
+                is_active=True,
             ))
+            created += 1
+
+    incoming_names = set(incoming.keys())
+    for row in existing_rows:
+        if row.name not in incoming_names and row.is_active:
+            row.is_active = False
+            deactivated += 1
+
+    # Dialer registration is authoritative for existence; panel controls active toggle afterward.
     db.commit()
-    return {"registered": len(payload.scenarios)}
+    return {
+        "registered": len(incoming),
+        "created": created,
+        "updated": updated,
+        "deactivated": deactivated,
+    }
+
+
+@router.post("/register-outbound-lines")
+def register_outbound_lines(
+    payload: RegisterOutboundLinesRequest,
+    db: Session = Depends(get_db),
+):
+    """Dialer app registers available outbound lines on startup."""
+    company_obj = db.query(Company).filter(Company.name == payload.company, Company.is_active == True).first()
+    if not company_obj:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    incoming = {item.phone_number: item for item in payload.outbound_lines}
+    existing_rows = db.query(OutboundLine).filter(OutboundLine.company_id == company_obj.id).all()
+    existing_by_phone = {row.phone_number: row for row in existing_rows}
+
+    created = 0
+    updated = 0
+    deactivated = 0
+
+    for phone, item in incoming.items():
+        existing = existing_by_phone.get(phone)
+        if existing:
+            if existing.display_name != item.display_name:
+                existing.display_name = item.display_name
+                updated += 1
+        else:
+            db.add(OutboundLine(
+                company_id=company_obj.id,
+                phone_number=phone,
+                display_name=item.display_name,
+                is_active=True,
+            ))
+            created += 1
+
+    incoming_phones = set(incoming.keys())
+    for row in existing_rows:
+        if row.phone_number not in incoming_phones and row.is_active:
+            row.is_active = False
+            deactivated += 1
+
+    # Dialer registration is authoritative for existence; panel controls active toggle afterward.
+    db.commit()
+    return {
+        "registered": len(incoming),
+        "created": created,
+        "updated": updated,
+        "deactivated": deactivated,
+    }

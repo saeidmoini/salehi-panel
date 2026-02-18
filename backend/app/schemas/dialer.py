@@ -21,6 +21,12 @@ class DialerAgent(BaseModel):
     phone_number: str | None = None
 
 
+class DialerOutboundLine(BaseModel):
+    id: int
+    phone_number: str
+    display_name: str
+
+
 class ScenarioSimple(BaseModel):
     """Simplified scenario schema for dialer responses"""
     id: int
@@ -37,6 +43,7 @@ class NextBatchResponse(BaseModel):
     retry_after_seconds: int | None = None
     batch: DialerBatchOut | None = None
     active_scenarios: list[ScenarioSimple] = []
+    outbound_lines: list[DialerOutboundLine] = []
     inbound_agents: list[DialerAgent] = []
     outbound_agents: list[DialerAgent] = []
     # Deprecated: active_agents (replaced by inbound_agents + outbound_agents)

@@ -16,7 +16,7 @@ from ..models.scenario import Scenario
 from ..models.outbound_line import OutboundLine
 from ..schemas.dialer import DialerReport
 from .schedule_service import is_call_allowed, ensure_config, TEHRAN_TZ, charge_for_connected_call
-from .phone_service import normalize_phone
+from .phone_service import normalize_phone, _sync_global_status_from_call_status
 from . import auth_service
 
 settings = get_settings()
@@ -54,6 +54,7 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
             "reason": reason,
             "retry_after_seconds": retry_after,
             "active_scenarios": [],
+            "outbound_lines": [],
             "inbound_agents": [],
             "outbound_agents": [],
         }
@@ -68,15 +69,8 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
     # Calculate cooldown cutoff
     cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.call_cooldown_days)
 
-    # Subquery: numbers already called by THIS company
-    called_by_company = (
-        select(CallResult.phone_number_id)
-        .where(CallResult.company_id == company.id)
-        .distinct()
-        .subquery()
-    )
-
-    # Main query: fetch eligible numbers
+    # OPTIMIZED: Use NOT EXISTS instead of NOT IN for better performance
+    # NOT EXISTS works with FOR UPDATE (unlike LEFT JOIN)
     stmt = (
         select(PhoneNumber)
         .where(
@@ -84,15 +78,20 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
             PhoneNumber.global_status == GlobalStatus.ACTIVE,
             # Number not assigned to any batch currently
             PhoneNumber.assigned_at.is_(None),
-            # Never called by this company
-            PhoneNumber.id.notin_(called_by_company),
+            # Never called by this company - use NOT EXISTS with indexed lookup
+            ~select(CallResult.id)
+            .where(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == company.id
+            )
+            .exists(),
             # Global 3-day cooldown (across all companies)
             or_(
                 PhoneNumber.last_called_at.is_(None),
                 PhoneNumber.last_called_at < cooldown_cutoff
             ),
         )
-        .order_by(PhoneNumber.created_at)
+        .order_by(PhoneNumber.id)
         .limit(requested_size)
         .with_for_update(skip_locked=True)
     )
@@ -134,6 +133,10 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
         Scenario.company_id == company.id,
         Scenario.is_active == True
     ).all()
+    active_outbound_lines = db.query(OutboundLine).filter(
+        OutboundLine.company_id == company.id,
+        OutboundLine.is_active == True
+    ).all()
 
     return {
         "call_allowed": True,
@@ -143,6 +146,10 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
         "active_scenarios": [
             {"id": s.id, "name": s.name, "display_name": s.display_name}
             for s in active_scenarios
+        ],
+        "outbound_lines": [
+            {"id": line.id, "phone_number": line.phone_number, "display_name": line.display_name}
+            for line in active_outbound_lines
         ],
         "inbound_agents": [
             {
@@ -206,7 +213,6 @@ def report_result(db: Session, report: DialerReport, company: Company):
             number = PhoneNumber(
                 phone_number=normalized_phone,
                 global_status=GlobalStatus.ACTIVE,
-                total_attempts=0,
             )
             db.add(number)
             db.commit()
@@ -235,21 +241,11 @@ def report_result(db: Session, report: DialerReport, company: Company):
     # Update global tracking on the number
     number.last_called_at = report.attempted_at
     number.last_called_company_id = company.id
-    number.last_attempt_at = report.attempted_at
-    number.total_attempts += 1
-    number.last_status_change_at = datetime.now(timezone.utc)
     number.assigned_at = None
     number.assigned_batch_id = None
 
-    # Set global status based on result
-    if report.status == CallStatus.POWER_OFF:
-        number.global_status = GlobalStatus.POWER_OFF
-
-    if report.user_message:
-        number.last_user_message = report.user_message
-
-    if agent:
-        number.assigned_agent_id = agent.id
+    # Set shared/global status on numbers table for statuses that apply to all companies
+    _sync_global_status_from_call_status(number, report.status)
 
     # Create call result
     db.add(
@@ -263,7 +259,6 @@ def report_result(db: Session, report: DialerReport, company: Company):
             attempted_at=report.attempted_at,
             agent_id=agent.id if agent else None,
             user_message=report.user_message,
-            created_at=datetime.now(timezone.utc),
         )
     )
 
