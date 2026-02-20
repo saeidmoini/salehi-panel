@@ -97,6 +97,11 @@ def topup_match(
         minute=payload.minute,
         user=user,
     )
+    wallet_service.notify_google_sheet_topup(
+        company_name=company.name,
+        amount_toman=tx.amount_toman,
+        transaction_at=tx.transaction_at,
+    )
     return WalletTransactionOut(
         id=tx.id,
         amount_toman=tx.amount_toman,

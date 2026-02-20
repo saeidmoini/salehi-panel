@@ -25,6 +25,9 @@ database_url: ""   # leave empty to auto-build with URL-encoded password; or set
 
 secret_key: "CHANGE_ME_SECRET"
 dialer_token: "CHANGE_ME_DIALER_TOKEN"
+google_sheet_webhook_url: ""
+google_sheet_webhook_token: ""
+google_sheet_webhook_timeout_seconds: 10
 cors_origins:
   - "http://localhost:5173"
   - "http://127.0.0.1:5173"

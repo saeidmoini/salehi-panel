@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     )
     melipayamak_from: str = Field("9982003047", alias="MELIPAYAMAK_FROM")
     melipayamak_api_key: str = Field("", alias="MELIPAYAMAK_API_KEY")
+    google_sheet_webhook_url: str = Field("", alias="GOOGLE_SHEET_WEBHOOK_URL")
+    google_sheet_webhook_token: str = Field("", alias="GOOGLE_SHEET_WEBHOOK_TOKEN")
+    google_sheet_webhook_timeout_seconds: int = Field(10, alias="GOOGLE_SHEET_WEBHOOK_TIMEOUT_SECONDS")
     short_retry_seconds: int = 300
     long_retry_seconds: int = 900
     cors_origins: list[str] = Field(

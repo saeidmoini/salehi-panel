@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from urllib import request
+import logging
 import json
 import re
 import jdatetime
@@ -17,6 +18,7 @@ from ..models.wallet import BankIncomingSms, WalletTransaction
 from .schedule_service import TEHRAN_TZ, ensure_config
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -127,6 +129,38 @@ def _forward_sms_to_managers(text: str) -> None:
     except Exception:
         # Forwarding failure should not block SMS ingestion.
         return
+
+
+def notify_google_sheet_topup(*, company_name: str, amount_toman: int, transaction_at: datetime) -> None:
+    webhook_url = (settings.google_sheet_webhook_url or "").strip()
+    webhook_token = (settings.google_sheet_webhook_token or "").strip()
+    if not webhook_url or not webhook_token:
+        return
+    if (company_name or "").strip().lower() != "salehi":
+        return
+
+    tx_dt = transaction_at
+    if tx_dt.tzinfo is None:
+        tx_dt = tx_dt.replace(tzinfo=timezone.utc)
+    tx_date = tx_dt.astimezone(TEHRAN_TZ).strftime("%Y-%m-%d")
+
+    payload = {
+        "token": webhook_token,
+        "amount": amount_toman,
+        "date": tx_date,
+    }
+    req = request.Request(
+        webhook_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=settings.google_sheet_webhook_timeout_seconds):
+            pass
+    except Exception as exc:
+        # Webhook is best-effort and must not fail wallet charge.
+        logger.warning("Google Sheet webhook failed for company=%s: %s", company_name, exc)
 
 
 def should_store_bank_sms(parsed: ParsedBankSms | None) -> bool:

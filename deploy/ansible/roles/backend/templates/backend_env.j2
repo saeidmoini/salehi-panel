@@ -10,3 +10,6 @@ DEFAULT_BATCH_SIZE=100
 TIMEZONE=Asia/Tehran
 SKIP_HOLIDAYS=true
 CORS_ORIGINS={{ cors_origins | to_json }}
+GOOGLE_SHEET_WEBHOOK_URL={{ google_sheet_webhook_url | default('') }}
+GOOGLE_SHEET_WEBHOOK_TOKEN={{ google_sheet_webhook_token | default('') }}
+GOOGLE_SHEET_WEBHOOK_TIMEOUT_SECONDS={{ google_sheet_webhook_timeout_seconds | default(10) }}
