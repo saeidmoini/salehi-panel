@@ -630,6 +630,9 @@ const NumbersPage = () => {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3 mb-3">
+          <div className="text-xs text-slate-600">
+            تعداد فیلترشده: <strong className="text-slate-900">{totalCount.toLocaleString()}</strong>
+          </div>
           {isAdmin && (
             <div className="flex flex-wrap items-center gap-2 w-full">
               <label className="text-xs text-slate-600 whitespace-nowrap">عملیات گروهی</label>
