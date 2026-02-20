@@ -39,7 +39,6 @@ This document provides comprehensive context about the Salehi Dialer Admin Panel
 - **Lines of Code:** ~1,868 lines
 
 ### Deployment
-- **Automation:** Ansible playbooks with roles
 - **Web Server:** Nginx reverse proxy
 - **Process Manager:** systemd
 - **SSL/TLS:** Arvan CDN integration
@@ -128,21 +127,6 @@ salehi-panel/
 │   ├── package.json                # 12 deps, 6 devDeps
 │   ├── vite.config.ts
 │   └── tailwind.config.js
-├── deploy/
-│   └── ansible/
-│       ├── group_vars/
-│       │   ├── prod.yml            # Agrad config (ignored)
-│       │   ├── prod_salehi.yml     # Salehi config (ignored)
-│       │   └── prod.sample.yml     # Template
-│       ├── roles/
-│       │   ├── backend/            # Gunicorn systemd
-│       │   ├── frontend/           # npm build
-│       │   ├── nginx/              # Reverse proxy
-│       │   ├── postgres/           # DB setup
-│       │   ├── common/             # System packages
-│       │   └── ssl_arvan/          # SSL certs
-│       ├── inventory.ini
-│       └── playbook.yml
 ├── docs/
 │   └── callcenter_agent.md         # Dialer integration
 ├── README.md                        # Main docs
@@ -929,32 +913,6 @@ DEBUG=false
 VITE_API_BASE=http://localhost:8000
 ```
 
-### Ansible Variables (group_vars/)
-
-**prod.yml (agrad branch):**
-```yaml
-ansible_host: 1.2.3.4
-ansible_user: root
-repo_url: git@github.com:user/repo.git
-repo_branch: agrad
-db_name: dialer_agrad
-db_user: dialer
-db_password: secure_password
-backend_domain: api.agrad.example.com
-frontend_domain: panel.agrad.example.com
-dialer_token: "{{ vault_dialer_token }}"
-ssl_email: admin@example.com
-```
-
-**prod_salehi.yml (salehi branch):**
-```yaml
-# Same structure, different values
-repo_branch: salehi
-db_name: dialer_salehi
-backend_domain: api.salehi.example.com
-frontend_domain: panel.salehi.example.com
-```
-
 ---
 
 ## Development Workflow
@@ -1006,21 +964,7 @@ PYTHONPATH=. pytest tests/
 
 ### Deployment
 
-**First install:**
-```bash
-cd deploy/ansible
-ansible-playbook -i inventory.ini playbook.yml \
-  -e env_variant=salehi \
-  --tags init,deploy,frontend,ssl
-```
-
-**Routine updates:**
-```bash
-ansible-playbook -i inventory.ini playbook.yml \
-  -e env_variant=salehi \
-  --tags deploy,frontend \
-  --skip-tags init,ssl
-```
+- Use your preferred deployment process.
 
 ---
 
@@ -1499,7 +1443,7 @@ curl http://localhost:8000/api/dialer/next-batch?size=10 \
 1. Develop on feature branch
 2. Merge to agrad/salehi
 3. Push to remote
-4. Ansible pulls and deploys
+4. Deploy to server
 5. Systemd restarts service
 
 ---

@@ -59,7 +59,7 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
   - `MELIPAYAMAK_API_KEY`
 - JWT expiry defaults to 1 day (`ACCESS_TOKEN_EXPIRE_MINUTES`).
 - Frontend `.env` (see `frontend/.env.example`): `VITE_API_BASE`.
-- `.gitignore` already ignores envs, node_modules, venv, builds. Keep it updated when new tools are added. Ansible secrets: `deploy/ansible/group_vars/prod.yml` is ignored; use the provided `prod.sample.yml` as a template and/or Ansible Vault for secrets.
+- `.gitignore` already ignores envs, node_modules, venv, builds. Keep it updated when new tools are added.
 
 ## Testing
 - Basic pytest suite under `backend/tests` (phone normalization, scheduling helper). Run with `PYTHONPATH=backend pytest backend/tests`. Extend with service-level tests when altering logic.
@@ -67,11 +67,8 @@ This repo hosts a separate admin panel for a VoIP dialer. Backend is FastAPI + S
 ## Deployment/Server
 - ASGI ready (uvicorn/gunicorn). Tables auto-create via `Base.metadata.create_all`; add Alembic migrations for production changes.
 - Keep dialer token secret; do not expose dialer routes without auth.
-- Ops automation lives under `deploy/ansible/` (roles for backend/frontend/nginx/systemd/ssl); systemd + nginx templates are in `roles/backend/templates/gunicorn.service.j2` and `roles/nginx/templates/site.conf.j2`.
 - Alembic scaffold (with `0001_initial`, `0002_roles_agents_and_statuses`) is under `backend/alembic/`. Use `alembic revision --autogenerate` + `alembic upgrade head` when models change; ensure `DATABASE_URL` is set in `.env`.
-- Ansible tags: `init` (one-time: DB/user creation, systemd unit, SSL/ACME, optional admin seed), `deploy` (git pull, pip with gunicorn, Alembic upgrade, systemd restart, nginx config/reload and removes default site), `frontend` (npm install/build), `ssl` (ACME/Arvan). For updates run `--tags deploy,frontend --skip-tags init,ssl`; first install run `--tags init,deploy,frontend,ssl`. Keep `initial_admin_user/password` empty after first seed to avoid repeats.
 - Queue safety: numbers assigned to a batch are locked; stale assignments auto-unlock after `ASSIGNMENT_TIMEOUT_MINUTES` (default 60) so they can return to IN_QUEUE if the dialer crashes.
-- Single-server discipline: keep only `deploy/ansible/group_vars/prod.yml` (Agrad).
 
 ## Always
 - Update README.md when behavior/config changes.

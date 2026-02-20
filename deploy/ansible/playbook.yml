@@ -1,9 +1,0 @@
-- hosts: prod
-  become: true
-  roles:
-    - common
-    - postgres
-    - backend
-    - frontend
-    - ssl_arvan
-    - nginx

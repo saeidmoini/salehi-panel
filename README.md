@@ -154,18 +154,6 @@ Admin panel for managing outbound dialing campaigns: phone number queueing, call
 - Tables auto-create on startup via `Base.metadata.create_all`; migrate with Alembic later if needed.
 - JWT tokens default to 1-day expiry (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1440).
 
-## Deployment (systemd + nginx)
-- Systemd and nginx templates live inside the Ansible roles: `deploy/ansible/roles/backend/templates/gunicorn.service.j2` and `deploy/ansible/roles/nginx/templates/site.conf.j2`. Render them via Ansible or adapt manually.
-- Update paths, domain, and SSL certs as needed.
-- Single-server setup: use only `deploy/ansible/group_vars/prod.yml` for Agrad.
-
-## Ansible (repeatable deploy)
-- A ready-to-use Ansible skeleton is under `deploy/ansible/` (inventory, playbook, roles for common packages, postgres, backend, frontend, nginx, ssl).
-- Copy `deploy/ansible/group_vars/prod.sample.yml` to `deploy/ansible/group_vars/prod.yml` (ignored by git) and fill in your server IP, repo URL, DB creds, domains, ports, and tokens (or use Ansible Vault).
-- Tags:
-  - `init`: one-time tasks (DB/user creation, systemd unit, SSL/ACME, optional initial admin seed)
-  - `deploy`: git pull, pip (gunicorn ensured), Alembic upgrade, systemd restart, nginx config/reload (removes default site)
-  - `frontend`: npm install/build, frontend .env render
-  - `ssl`: ACME/Arvan issuance/renewal
-- First install: `cd deploy/ansible && ansible-playbook -i inventory.ini playbook.yml --tags init,deploy,frontend,ssl`
-- Routine updates: `cd deploy/ansible && ansible-playbook -i inventory.ini playbook.yml --tags deploy,frontend --skip-tags init,ssl`
+## Deployment
+- Deploy with your preferred process manager and reverse proxy (for example, gunicorn + nginx).
+- Ensure backend `.env` and frontend build-time env values are present on the server.
