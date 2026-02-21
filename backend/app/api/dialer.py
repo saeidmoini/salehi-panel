@@ -36,8 +36,8 @@ def report_result(report: DialerReport, db: Session = Depends(get_db)):
     if not company_obj:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    number = dialer_service.report_result(db, report, company=company_obj)
-    return {"id": number.id, "global_status": number.global_status}
+    result = dialer_service.report_result(db, report, company=company_obj)
+    return result
 
 
 @router.post("/register-scenarios")
