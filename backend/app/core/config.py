@@ -27,12 +27,14 @@ class Settings(BaseSettings):
     melipayamak_api_key: str = Field("", alias="MELIPAYAMAK_API_KEY")
     # Multi-profile bank config (preferred)
     salehi_bank_name: str = Field("Salehi Bank", alias="SALEHI_BANK_NAME")
+    # Supports one or many sender numbers separated by comma.
     salehi_bank_sms_sender: str = Field("", alias="SALEHI_BANK_SMS_SENDER")
     salehi_manager_alert_numbers: str = Field("", alias="SALEHI_MANAGER_ALERT_NUMBERS")
     salehi_melipayamak_from: str = Field("", alias="SALEHI_MELIPAYAMAK_FROM")
     salehi_melipayamak_api_key: str = Field("", alias="SALEHI_MELIPAYAMAK_API_KEY")
     salehi_sms_parser: str = Field("default", alias="SALEHI_SMS_PARSER")
     default_bank_name: str = Field("Default Bank", alias="DEFAULT_BANK_NAME")
+    # Supports one or many sender numbers separated by comma.
     default_bank_sms_sender: str = Field("", alias="DEFAULT_BANK_SMS_SENDER")
     default_manager_alert_numbers: str = Field("", alias="DEFAULT_MANAGER_ALERT_NUMBERS")
     default_melipayamak_from: str = Field("", alias="DEFAULT_MELIPAYAMAK_FROM")

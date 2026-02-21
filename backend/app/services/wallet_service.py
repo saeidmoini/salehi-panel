@@ -33,7 +33,7 @@ class ParsedBankSms:
 class BankSmsProfile:
     key: str
     bank_name: str
-    sms_sender: str
+    sms_senders: list[str]
     manager_numbers: list[str]
     melipayamak_from: str
     melipayamak_api_key: str
@@ -108,6 +108,15 @@ def _split_numbers(raw: str | None) -> list[str]:
     return [n.strip() for n in (raw or "").split(",") if n.strip()]
 
 
+def _split_senders(raw: str | None) -> list[str]:
+    senders: list[str] = []
+    for value in _split_numbers(raw):
+        normalized = _normalize_sender(value)
+        if normalized:
+            senders.append(normalized)
+    return senders
+
+
 def _normalize_sender(value: str | None) -> str:
     raw = _to_ascii_digits((value or "").strip())
     if not raw:
@@ -121,7 +130,7 @@ def _build_bank_profiles() -> list[BankSmsProfile]:
     salehi = BankSmsProfile(
         key="salehi",
         bank_name=(settings.salehi_bank_name or "Salehi Bank").strip(),
-        sms_sender=_normalize_sender(settings.salehi_bank_sms_sender),
+        sms_senders=_split_senders(settings.salehi_bank_sms_sender),
         manager_numbers=_split_numbers(settings.salehi_manager_alert_numbers),
         melipayamak_from=(settings.salehi_melipayamak_from or "").strip(),
         melipayamak_api_key=(settings.salehi_melipayamak_api_key or "").strip(),
@@ -130,13 +139,13 @@ def _build_bank_profiles() -> list[BankSmsProfile]:
     default_profile = BankSmsProfile(
         key="default",
         bank_name=(settings.default_bank_name or "Default Bank").strip(),
-        sms_sender=_normalize_sender(settings.default_bank_sms_sender or settings.bank_sms_sender),
+        sms_senders=_split_senders(settings.default_bank_sms_sender or settings.bank_sms_sender),
         manager_numbers=_split_numbers(settings.default_manager_alert_numbers or settings.manager_alert_numbers),
         melipayamak_from=(settings.default_melipayamak_from or settings.melipayamak_from).strip(),
         melipayamak_api_key=(settings.default_melipayamak_api_key or settings.melipayamak_api_key).strip(),
         parser_key=(settings.default_sms_parser or "default").strip().lower(),
     )
-    profiles = [p for p in [salehi, default_profile] if p.sms_sender]
+    profiles = [p for p in [salehi, default_profile] if p.sms_senders]
     return profiles
 
 
@@ -145,7 +154,7 @@ def _resolve_profile_by_sender(sender: str) -> BankSmsProfile | None:
     if not normalized_sender:
         return None
     for profile in _build_bank_profiles():
-        if profile.sms_sender == normalized_sender:
+        if normalized_sender in profile.sms_senders:
             return profile
     return None
 
