@@ -46,19 +46,6 @@ const OutboundLinesPage = () => {
     }
   }
 
-  const deleteLine = async (line: OutboundLine) => {
-    if (!company) return
-    const ok = window.confirm(`آیا از حذف خط "${line.display_name}" مطمئن هستید؟`)
-    if (!ok) return
-    try {
-      await client.delete(`/api/${company.name}/outbound-lines/${line.id}`)
-      fetchLines()
-    } catch (error) {
-      console.error('Failed to delete line', error)
-      alert('خطا در حذف خط خروجی')
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -74,6 +61,9 @@ const OutboundLinesPage = () => {
           <h1 className="text-2xl font-bold text-slate-900">مدیریت خطوط خروجی</h1>
           <p className="text-sm text-slate-600 mt-1">
             خطوط تلفن خروجی برای شرکت {company?.display_name}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            حذف خطوط خروجی از طریق پنل غیرفعال است.
           </p>
         </div>
       </div>
@@ -122,12 +112,6 @@ const OutboundLinesPage = () => {
                         onClick={() => toggleActive(line)}
                       >
                         {line.is_active ? 'غیرفعال' : 'فعال'}
-                      </button>
-                      <button
-                        className="text-xs px-3 py-1 rounded text-red-600 hover:bg-red-50"
-                        onClick={() => deleteLine(line)}
-                      >
-                        حذف
                       </button>
                     </div>
                   </td>

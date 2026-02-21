@@ -86,14 +86,5 @@ def delete_outbound_line(
     user: AdminUser = Depends(get_company_admin),
     db: Session = Depends(get_db),
 ):
-    """Delete outbound line (admin only)"""
-    line = db.query(OutboundLine).filter(
-        OutboundLine.id == line_id,
-        OutboundLine.company_id == company.id
-    ).first()
-    if not line:
-        raise HTTPException(status_code=404, detail="Outbound line not found")
-
-    db.delete(line)
-    db.commit()
-    return {"deleted": True, "id": line_id}
+    """Outbound line deletion is disabled from panel."""
+    raise HTTPException(status_code=405, detail="Deleting outbound lines is disabled")
