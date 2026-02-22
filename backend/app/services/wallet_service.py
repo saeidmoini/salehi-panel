@@ -57,7 +57,8 @@ def parse_bank_sms(body: str) -> tuple[ParsedBankSms | None, str | None]:
     amount_rial = int(amount_match.group(1).replace(",", ""))
     amount_toman = amount_rial // 10
 
-    dt_match = re.search(r"(\d{4}/\d{2}/\d{2})-(\d{2}):(\d{2})", text)
+    # Banks may send non-zero-padded Jalali date/time parts (e.g. 1404/12/3-9:47).
+    dt_match = re.search(r"(\d{4}/\d{1,2}/\d{1,2})-(\d{1,2}):(\d{1,2})", text)
     if not dt_match:
         return None, "datetime_not_found"
 
@@ -78,7 +79,7 @@ def parse_bank_sms(body: str) -> tuple[ParsedBankSms | None, str | None]:
 
 
 def build_utc_datetime_from_jalali_minute(jalali_date: str, hour: int, minute: int) -> datetime:
-    date_match = re.fullmatch(r"(\d{4})/(\d{2})/(\d{2})", _to_ascii_digits(jalali_date or ""))
+    date_match = re.fullmatch(r"(\d{4})/(\d{1,2})/(\d{1,2})", _to_ascii_digits(jalali_date or ""))
     if not date_match:
         raise ValueError("invalid_jalali_date")
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
