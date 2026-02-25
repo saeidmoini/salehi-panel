@@ -269,7 +269,7 @@ def report_result(db: Session, report: DialerReport, company: Company):
 
     # Charge billing only for billable statuses
     if report.status in BILLABLE_STATUSES:
-        charge_for_connected_call(db, company_id=company.id)
+        charge_for_connected_call(db, company_id=company.id, scenario_id=report.scenario_id)
 
     db.refresh(number)
     return {

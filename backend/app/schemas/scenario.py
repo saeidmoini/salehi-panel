@@ -5,6 +5,7 @@ from datetime import datetime
 class ScenarioBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     display_name: str = Field(..., min_length=1, max_length=255)
+    cost_per_connected: int | None = Field(default=None, ge=0)
     is_active: bool = True
 
 
@@ -14,6 +15,7 @@ class ScenarioCreate(ScenarioBase):
 
 class ScenarioUpdate(BaseModel):
     display_name: str | None = None
+    cost_per_connected: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
 
 

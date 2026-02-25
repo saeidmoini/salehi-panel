@@ -162,7 +162,7 @@ const BillingPage = () => {
         {isSuperuser && (
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="flex flex-col gap-1">
-              <label className="text-sm text-slate-600">هزینه هر تماس برقرار شده ({data?.currency || 'تومان'})</label>
+              <label className="text-sm text-slate-600">هزینه پیش‌فرض هر تماس برقرار شده ({data?.currency || 'تومان'})</label>
               <input
                 type="number"
                 className="rounded border border-slate-200 px-3 py-2 text-sm"
@@ -195,7 +195,7 @@ const BillingPage = () => {
         {data && (
           <div className="text-sm text-slate-700 space-y-1 border-t border-slate-100 pt-4">
             <div>موجودی فعلی: {data.wallet_balance.toLocaleString()} {data.currency}</div>
-            <div>هزینه هر تماس: {data.cost_per_connected.toLocaleString()} {data.currency}</div>
+            <div>هزینه پیش‌فرض هر تماس: {data.cost_per_connected.toLocaleString()} {data.currency}</div>
             {data.disabled_by_dialer && <div className="text-amber-700">به دلیل اتمام موجودی، تماس‌گیری غیرفعال شده است.</div>}
           </div>
         )}

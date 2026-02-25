@@ -7,6 +7,7 @@ from ..schemas.scenario import ScenarioCreate, ScenarioUpdate, ScenarioOut
 from ..models.scenario import Scenario
 from ..models.company import Company
 from ..models.user import AdminUser
+from ..services import schedule_service
 
 router = APIRouter()
 
@@ -18,7 +19,20 @@ def list_scenarios(
     db: Session = Depends(get_db),
 ):
     """List all scenarios for a company"""
-    return db.query(Scenario).filter(Scenario.company_id == company.id).all()
+    cfg = schedule_service.ensure_config(db, company_id=company.id)
+    default_cost = cfg.cost_per_connected or 0
+    updated = db.query(Scenario).filter(
+        Scenario.company_id == company.id,
+        Scenario.cost_per_connected.is_(None),
+    ).update({Scenario.cost_per_connected: default_cost}, synchronize_session=False)
+    if updated:
+        db.commit()
+    return (
+        db.query(Scenario)
+        .filter(Scenario.company_id == company.id)
+        .order_by(Scenario.id.asc())
+        .all()
+    )
 
 
 @router.post("/{company_name}/scenarios", response_model=ScenarioOut)
@@ -29,6 +43,8 @@ def create_scenario(
     db: Session = Depends(get_db),
 ):
     """Create a new scenario (admin only)"""
+    cfg = schedule_service.ensure_config(db, company_id=company.id)
+
     # Verify company_id matches the path parameter
     if payload.company_id != company.id:
         raise HTTPException(status_code=400, detail="Company ID mismatch")
@@ -45,6 +61,7 @@ def create_scenario(
         company_id=payload.company_id,
         name=payload.name,
         display_name=payload.display_name,
+        cost_per_connected=payload.cost_per_connected if payload.cost_per_connected is not None else (cfg.cost_per_connected or 0),
         is_active=payload.is_active,
     )
     db.add(scenario)
@@ -62,6 +79,7 @@ def update_scenario(
     db: Session = Depends(get_db),
 ):
     """Update scenario (admin only)"""
+    schedule_service.ensure_config(db, company_id=company.id)
     scenario = db.query(Scenario).filter(
         Scenario.id == scenario_id,
         Scenario.company_id == company.id
@@ -71,6 +89,8 @@ def update_scenario(
 
     if payload.display_name is not None:
         scenario.display_name = payload.display_name
+    if payload.cost_per_connected is not None:
+        scenario.cost_per_connected = payload.cost_per_connected
     if payload.is_active is not None:
         scenario.is_active = payload.is_active
 

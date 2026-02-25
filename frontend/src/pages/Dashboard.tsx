@@ -301,7 +301,7 @@ const DashboardPage = () => {
             {billing ? billing.wallet_balance.toLocaleString() : '-'} تومان
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            هزینه هر تماس: {billing ? billing.cost_per_connected.toLocaleString() : '-'} تومان
+            هزینه پیش‌فرض هر تماس: {billing ? billing.cost_per_connected.toLocaleString() : '-'} تومان
           </div>
           {billing && billing.wallet_balance <= 0 && (
             <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1 mt-2">

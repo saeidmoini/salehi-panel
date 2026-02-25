@@ -8,6 +8,7 @@ from sqlalchemy import delete, text, inspect
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
+from ..models.scenario import Scenario
 from ..models.schedule import ScheduleConfig, ScheduleWindow
 from ..schemas.schedule import ScheduleConfigUpdate
 
@@ -20,6 +21,7 @@ def ensure_config(db: Session, company_id: int | None = None) -> ScheduleConfig:
     _ensure_enabled_column(db)
     _ensure_disabled_by_dialer_column(db)
     _ensure_billing_columns(db)
+    _ensure_scenario_billing_column(db)
 
     # Find config by company_id
     config = db.query(ScheduleConfig).filter_by(company_id=company_id).first()
@@ -83,6 +85,15 @@ def _ensure_billing_columns(db: Session) -> None:
         db.commit()
 
 
+def _ensure_scenario_billing_column(db: Session) -> None:
+    conn = db.connection()
+    inspector = inspect(conn)
+    cols = [c["name"] for c in inspector.get_columns("scenarios")]
+    if "cost_per_connected" not in cols:
+        conn.execute(text("ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS cost_per_connected INTEGER"))
+        db.commit()
+
+
 def get_config(db: Session, company_id: int | None = None) -> ScheduleConfig:
     return ensure_config(db, company_id=company_id)
 
@@ -126,7 +137,7 @@ def update_schedule(db: Session, data: ScheduleConfigUpdate, company_id: int | N
     return config
 
 
-def charge_for_connected_call(db: Session, company_id: int | None = None) -> int:
+def charge_for_connected_call(db: Session, company_id: int | None = None, scenario_id: int | None = None) -> int:
     """
     Deducts cost per connected call from wallet. Returns remaining balance.
     Automatically disables dialing if balance hits zero.
@@ -137,6 +148,13 @@ def charge_for_connected_call(db: Session, company_id: int | None = None) -> int
     if not cfg:
         raise HTTPException(status_code=500, detail="Billing config missing")
     cost = cfg.cost_per_connected or 0
+    if company_id is not None and scenario_id is not None:
+        scenario = db.query(Scenario).filter(
+            Scenario.id == scenario_id,
+            Scenario.company_id == company_id,
+        ).first()
+        if scenario and scenario.cost_per_connected is not None:
+            cost = scenario.cost_per_connected
     if cost <= 0:
         return cfg.wallet_balance or 0
 

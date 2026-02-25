@@ -46,6 +46,25 @@ const OutboundLinesPage = () => {
     }
   }
 
+  const editDisplayName = async (line: OutboundLine) => {
+    if (!company) return
+    const value = window.prompt('نام نمایشی خط خروجی:', line.display_name)
+    if (value === null) return
+    const trimmed = value.trim()
+    if (!trimmed) {
+      window.alert('نام نمایشی نمی‌تواند خالی باشد.')
+      return
+    }
+    try {
+      await client.put(`/api/${company.name}/outbound-lines/${line.id}`, {
+        display_name: trimmed
+      })
+      fetchLines()
+    } catch (error) {
+      console.error('Failed to update line display name', error)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -112,6 +131,12 @@ const OutboundLinesPage = () => {
                         onClick={() => toggleActive(line)}
                       >
                         {line.is_active ? 'غیرفعال' : 'فعال'}
+                      </button>
+                      <button
+                        className="text-xs px-3 py-1 rounded text-blue-700 hover:bg-blue-50"
+                        onClick={() => editDisplayName(line)}
+                      >
+                        ویرایش نام
                       </button>
                     </div>
                   </td>

@@ -30,7 +30,7 @@ class RegisterOutboundLineItem(BaseModel):
     """Minimal outbound line shape accepted from dialer startup registration."""
     model_config = ConfigDict(extra="forbid")
     phone_number: str = Field(..., min_length=1, max_length=32)
-    display_name: str = Field(..., min_length=1, max_length=255)
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class RegisterOutboundLinesRequest(BaseModel):
