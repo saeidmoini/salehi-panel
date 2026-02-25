@@ -18,7 +18,12 @@ def list_outbound_lines(
     db: Session = Depends(get_db),
 ):
     """List all outbound lines for a company"""
-    return db.query(OutboundLine).filter(OutboundLine.company_id == company.id).all()
+    return (
+        db.query(OutboundLine)
+        .filter(OutboundLine.company_id == company.id)
+        .order_by(OutboundLine.id.asc())
+        .all()
+    )
 
 
 @router.post("/{company_name}/outbound-lines", response_model=OutboundLineOut)

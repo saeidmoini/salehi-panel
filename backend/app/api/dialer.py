@@ -122,13 +122,8 @@ def register_outbound_lines(
             ))
             created += 1
 
-    incoming_phones = set(incoming.keys())
-    for row in existing_rows:
-        if row.phone_number not in incoming_phones and row.is_active:
-            row.is_active = False
-            deactivated += 1
-
-    # Dialer registration is authoritative for existence; panel controls active toggle afterward.
+    # Dialer registration updates/creates known lines only.
+    # Active/inactive state is controlled from panel and must remain untouched here.
     db.commit()
     return {
         "registered": len(incoming),
