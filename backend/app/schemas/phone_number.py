@@ -76,7 +76,7 @@ class PhoneNumberBulkAction(BaseModel):
     filter_global_status: GlobalStatus | None = None
     search: str | None = None
     agent_id: int | None = None
-    sort_by: str = Field(default="created_at", pattern="^(created_at|last_attempt_at|status)$")
+    sort_by: str = Field(default="created_at", pattern="^(created_at|last_attempt_at|status|total_attempts)$")
     sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
     start_date: str | None = None
     end_date: str | None = None
@@ -97,7 +97,7 @@ class PhoneNumberExportRequest(BaseModel):
     filter_global_status: GlobalStatus | None = None
     search: str | None = None
     agent_id: int | None = None
-    sort_by: str = Field(default="created_at", pattern="^(created_at|last_attempt_at|status)$")
+    sort_by: str = Field(default="created_at", pattern="^(created_at|last_attempt_at|status|total_attempts)$")
     sort_order: str = Field(default="desc", pattern="^(asc|desc)$")
     start_date: str | None = None
     end_date: str | None = None

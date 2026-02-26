@@ -34,7 +34,7 @@ def list_numbers(
     end_date: str | None = Query(default=None, description="ISO date (YYYY-MM-DD)"),
     skip: int = 0,
     limit: int = 50,
-    sort_by: str = Query(default="created_at", pattern="^(created_at|last_attempt_at|status)$"),
+    sort_by: str = Query(default="created_at", pattern="^(created_at|last_attempt_at|status|total_attempts)$"),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     agent_id: int | None = Query(default=None, description="Admin-only: filter numbers assigned to an agent"),
     db: Session = Depends(get_db),

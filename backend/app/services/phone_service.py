@@ -272,6 +272,16 @@ def list_numbers(
             .correlate(PhoneNumber)
             .scalar_subquery()
         )
+    elif sort_by == "total_attempts" and target_company_id:
+        column = (
+            select(func.count(CallResult.id))
+            .where(
+                CallResult.phone_number_id == PhoneNumber.id,
+                CallResult.company_id == target_company_id,
+            )
+            .correlate(PhoneNumber)
+            .scalar_subquery()
+        )
     elif sort_by == "status" and target_company_id:
         column = (
             select(CallResult.status)
@@ -737,6 +747,13 @@ def export_numbers(db: Session, payload: PhoneNumberExportRequest, current_user:
     if payload.sort_by == "last_attempt_at" and target_company_id:
         sort_col = (
             select(func.max(CallResult.attempted_at))
+            .where(CallResult.phone_number_id == PhoneNumber.id, CallResult.company_id == target_company_id)
+            .correlate(PhoneNumber)
+            .scalar_subquery()
+        )
+    elif payload.sort_by == "total_attempts" and target_company_id:
+        sort_col = (
+            select(func.count(CallResult.id))
             .where(CallResult.phone_number_id == PhoneNumber.id, CallResult.company_id == target_company_id)
             .correlate(PhoneNumber)
             .scalar_subquery()

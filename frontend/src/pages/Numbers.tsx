@@ -134,7 +134,7 @@ const NumbersPage = () => {
 
   const [bulkAction, setBulkAction] = useState<'update_status' | 'reset' | 'delete'>('update_status')
   const [bulkStatus, setBulkStatus] = useState<string>('IN_QUEUE')
-  const [sortBy, setSortBy] = useState<'created_at' | 'last_attempt_at' | 'status'>('created_at')
+  const [sortBy, setSortBy] = useState<'created_at' | 'last_attempt_at' | 'status' | 'total_attempts'>('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [exporting, setExporting] = useState(false)
   const [selectingAll, setSelectingAll] = useState(false)
@@ -522,7 +522,7 @@ const NumbersPage = () => {
     : selectedIds.size > 0
   const canExport = canBulk || selectAll
 
-  const handleSort = (field: 'last_attempt_at' | 'status') => {
+  const handleSort = (field: 'last_attempt_at' | 'status' | 'total_attempts') => {
     if (sortBy === field) {
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
     } else {
@@ -759,7 +759,9 @@ const NumbersPage = () => {
                   </th>
                   <th className="text-right whitespace-nowrap">سناریو</th>
                   <th className="text-right whitespace-nowrap">خط خروجی</th>
-                  <th className="text-right whitespace-nowrap">تعداد تلاش</th>
+                  <th className="text-right cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('total_attempts')}>
+                    تعداد تلاش {sortBy === 'total_attempts' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  </th>
                   <th className="text-right w-32 cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('last_attempt_at')}>
                     آخرین تلاش {sortBy === 'last_attempt_at' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
