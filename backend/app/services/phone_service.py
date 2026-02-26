@@ -319,7 +319,11 @@ def list_number_history(
 
     query = (
         db.query(CallResult)
-        .options(joinedload(CallResult.agent))
+        .options(
+            joinedload(CallResult.agent),
+            joinedload(CallResult.scenario),
+            joinedload(CallResult.outbound_line),
+        )
         .filter(CallResult.phone_number_id == number_id)
     )
     if target_company_id:
@@ -350,6 +354,8 @@ def list_number_history(
                 "last_user_message": call.user_message,
                 "assigned_agent_id": call.agent_id,
                 "assigned_agent": agent_payload,
+                "scenario_display_name": call.scenario.display_name if call.scenario else None,
+                "outbound_line_display_name": call.outbound_line.display_name if call.outbound_line else None,
             }
         )
     return history
@@ -362,6 +368,10 @@ def _enrich_with_call_data(db: Session, number_list: list, target_company_id: in
     number_ids = [n.id for n in number_list]
     all_calls = (
         db.query(CallResult)
+        .options(
+            joinedload(CallResult.scenario),
+            joinedload(CallResult.outbound_line),
+        )
         .filter(
             CallResult.phone_number_id.in_(number_ids),
             CallResult.company_id == target_company_id,
@@ -384,6 +394,8 @@ def _enrich_with_call_data(db: Session, number_list: list, target_company_id: in
             number.last_user_message = latest_call.user_message
             number.assigned_agent_id = latest_call.agent_id
             number.total_attempts = call_counts.get(number.id, 0)
+            number.scenario_display_name = latest_call.scenario.display_name if latest_call.scenario else None
+            number.outbound_line_display_name = latest_call.outbound_line.display_name if latest_call.outbound_line else None
 
 
 def count_numbers(

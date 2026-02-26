@@ -30,6 +30,8 @@ class PhoneNumberOut(BaseModel):
     last_user_message: str | None = None  # From most recent call_result
     assigned_agent_id: int | None = None  # From most recent call_result
     assigned_agent: dict | None = None  # From most recent call_result
+    scenario_display_name: str | None = None  # From most recent call_result
+    outbound_line_display_name: str | None = None  # From most recent call_result
 
     class Config:
         from_attributes = True
@@ -46,6 +48,8 @@ class PhoneNumberHistoryOut(BaseModel):
     last_user_message: str | None = None
     assigned_agent_id: int | None = None
     assigned_agent: dict | None = None
+    scenario_display_name: str | None = None
+    outbound_line_display_name: str | None = None
 
 
 class PhoneNumberImportResponse(BaseModel):

@@ -25,6 +25,8 @@ interface PhoneNumber {
     last_name?: string | null
     phone_number?: string | null
   } | null
+  scenario_display_name?: string | null
+  outbound_line_display_name?: string | null
 }
 
 interface PhoneNumberHistoryItem {
@@ -44,6 +46,8 @@ interface PhoneNumberHistoryItem {
     last_name?: string | null
     phone_number?: string | null
   } | null
+  scenario_display_name?: string | null
+  outbound_line_display_name?: string | null
 }
 
 const statusLabels: Record<string, string> = {
@@ -753,6 +757,8 @@ const NumbersPage = () => {
                   <th className="text-right cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('status')}>
                     وضعیت {sortBy === 'status' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
+                  <th className="text-right whitespace-nowrap">سناریو</th>
+                  <th className="text-right whitespace-nowrap">خط خروجی</th>
                   <th className="text-right whitespace-nowrap">تعداد تلاش</th>
                   <th className="text-right w-32 cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('last_attempt_at')}>
                     آخرین تلاش {sortBy === 'last_attempt_at' && (sortOrder === 'asc' ? '↑' : '↓')}
@@ -791,6 +797,8 @@ const NumbersPage = () => {
                         {statusLabels[n.status || 'IN_QUEUE'] || n.status}
                       </span>
                     </td>
+                    <td className="text-right whitespace-nowrap">{n.scenario_display_name || '-'}</td>
+                    <td className="text-right whitespace-nowrap">{n.outbound_line_display_name || '-'}</td>
                     <td className="text-right whitespace-nowrap">
                       {n.total_attempts > 0 ? (
                         <button
@@ -899,6 +907,8 @@ const NumbersPage = () => {
                       <th className="py-2 text-right whitespace-nowrap">شماره</th>
                       <th className="text-right whitespace-nowrap">وضعیت گلوبال</th>
                       <th className="text-right whitespace-nowrap">وضعیت</th>
+                      <th className="text-right whitespace-nowrap">سناریو</th>
+                      <th className="text-right whitespace-nowrap">خط خروجی</th>
                       <th className="text-right whitespace-nowrap">تعداد تلاش</th>
                       <th className="text-right w-32 whitespace-nowrap">آخرین تلاش</th>
                       <th className="text-right w-36 whitespace-nowrap">کارشناس</th>
@@ -925,6 +935,8 @@ const NumbersPage = () => {
                             {statusLabels[h.status || 'IN_QUEUE'] || h.status}
                           </span>
                         </td>
+                        <td className="text-right whitespace-nowrap">{h.scenario_display_name || '-'}</td>
+                        <td className="text-right whitespace-nowrap">{h.outbound_line_display_name || '-'}</td>
                         <td className="text-right whitespace-nowrap">{h.total_attempts}</td>
                         <td className="text-right whitespace-nowrap">
                           {h.last_attempt_at ? dayjs(h.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
