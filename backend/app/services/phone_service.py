@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from ..models.phone_number import PhoneNumber, CallStatus, GlobalStatus
 from ..models.call_result import CallResult
+from ..models.dialer_batch_item import DialerBatchItem
 from ..models.user import AdminUser, UserRole
 from ..models.company import Company
 from ..core.config import get_settings
@@ -330,9 +331,23 @@ def list_number_history(
         query = query.filter(CallResult.company_id == target_company_id)
 
     calls = query.order_by(CallResult.id.desc()).all()
+    call_result_ids = [c.id for c in calls]
+    batch_map: dict[int, DialerBatchItem] = {}
+    if call_result_ids:
+        batch_rows = (
+            db.query(DialerBatchItem)
+            .filter(DialerBatchItem.report_call_result_id.in_(call_result_ids))
+            .order_by(DialerBatchItem.id.desc())
+            .all()
+        )
+        for row in batch_rows:
+            if row.report_call_result_id and row.report_call_result_id not in batch_map:
+                batch_map[row.report_call_result_id] = row
+
     total = len(calls)
     history: list[dict] = []
     for idx, call in enumerate(calls):
+        trace = batch_map.get(call.id)
         agent_payload = None
         if call.agent:
             agent_payload = {
@@ -356,6 +371,8 @@ def list_number_history(
                 "assigned_agent": agent_payload,
                 "scenario_display_name": call.scenario.display_name if call.scenario else None,
                 "outbound_line_display_name": call.outbound_line.display_name if call.outbound_line else None,
+                "sent_batch_id": trace.batch_id if trace else None,
+                "reported_batch_id": trace.report_batch_id if trace else None,
             }
         )
     return history

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     dialer_token: str = Field(..., alias="DIALER_TOKEN")
     default_batch_size: int = Field(100, alias="DEFAULT_BATCH_SIZE")
+    max_batch_size: int = Field(40, alias="MAX_BATCH_SIZE")
     timezone: str = Field("Asia/Tehran", alias="TIMEZONE")
     skip_holidays_default: bool = Field(True, alias="SKIP_HOLIDAYS")
     assignment_timeout_minutes: int = Field(1440, alias="ASSIGNMENT_TIMEOUT_MINUTES")

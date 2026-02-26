@@ -3,6 +3,7 @@ from .phone_number import PhoneNumber, CallStatus, GlobalStatus
 from .schedule import ScheduleConfig, ScheduleWindow
 from .call_result import CallResult
 from .dialer_batch import DialerBatch
+from .dialer_batch_item import DialerBatchItem
 from .company import Company
 from .scenario import Scenario
 from .outbound_line import OutboundLine
@@ -19,6 +20,7 @@ __all__ = [
     "ScheduleWindow",
     "CallResult",
     "DialerBatch",
+    "DialerBatchItem",
     "Company",
     "Scenario",
     "OutboundLine",

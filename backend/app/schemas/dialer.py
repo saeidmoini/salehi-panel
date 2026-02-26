@@ -62,3 +62,4 @@ class DialerReport(BaseModel):
     agent_id: int | None = Field(default=None, description="Optional agent id tied to the call")
     agent_phone: str | None = Field(default=None, description="Phone of the agent who handled the call")
     user_message: str | None = Field(default=None, description="Customer message/comment to store with the attempt")
+    batch_id: str | None = Field(default=None, description="Batch ID that dialer believes this report belongs to")

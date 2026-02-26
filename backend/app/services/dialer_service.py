@@ -10,6 +10,7 @@ from ..core.config import get_settings
 from ..models.phone_number import PhoneNumber, CallStatus, GlobalStatus
 from ..models.dialer_batch import DialerBatch
 from ..models.call_result import CallResult
+from ..models.dialer_batch_item import DialerBatchItem
 from ..models.user import AdminUser, UserRole, AgentType
 from ..models.company import Company
 from ..models.scenario import Scenario
@@ -71,6 +72,8 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
     else:
         requested_size = size
     requested_size = max(0, requested_size)
+    if settings.max_batch_size > 0:
+        requested_size = min(requested_size, settings.max_batch_size)
 
     unlock_stale_assignments(db)
 
@@ -111,6 +114,14 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
     for num in numbers:
         num.assigned_at = now_utc
         num.assigned_batch_id = batch_id
+        db.add(
+            DialerBatchItem(
+                batch_id=batch_id,
+                company_id=company.id,
+                phone_number_id=num.id,
+                assigned_at=now_utc,
+            )
+        )
 
     db.add(
         DialerBatch(
@@ -241,6 +252,8 @@ def report_result(db: Session, report: DialerReport, company: Company):
             config.version += 1
         config.disabled_by_dialer = not report.call_allowed
 
+    assigned_batch_snapshot = number.assigned_batch_id
+
     # Update global tracking on the number
     number.last_called_at = report.attempted_at
     number.last_called_company_id = company.id
@@ -251,19 +264,71 @@ def report_result(db: Session, report: DialerReport, company: Company):
     _sync_global_status_from_call_status(number, report.status)
 
     # Create call result
-    db.add(
-        CallResult(
-            phone_number_id=number.id,
-            company_id=company.id,
-            scenario_id=report.scenario_id,
-            outbound_line_id=report.outbound_line_id,
-            status=report.status.value,
-            reason=report.reason,
-            attempted_at=report.attempted_at,
-            agent_id=agent.id if agent else None,
-            user_message=report.user_message,
-        )
+    call_result = CallResult(
+        phone_number_id=number.id,
+        company_id=company.id,
+        scenario_id=report.scenario_id,
+        outbound_line_id=report.outbound_line_id,
+        status=report.status.value,
+        reason=report.reason,
+        attempted_at=report.attempted_at,
+        agent_id=agent.id if agent else None,
+        user_message=report.user_message,
     )
+    db.add(call_result)
+    db.flush()
+
+    now_utc = datetime.now(timezone.utc)
+    batch_item = None
+    if report.batch_id:
+        batch_item = (
+            db.query(DialerBatchItem)
+            .filter(
+                DialerBatchItem.batch_id == report.batch_id,
+                DialerBatchItem.company_id == company.id,
+                DialerBatchItem.phone_number_id == number.id,
+            )
+            .order_by(DialerBatchItem.id.desc())
+            .first()
+        )
+    if not batch_item and assigned_batch_snapshot:
+        batch_item = (
+            db.query(DialerBatchItem)
+            .filter(
+                DialerBatchItem.batch_id == assigned_batch_snapshot,
+                DialerBatchItem.company_id == company.id,
+                DialerBatchItem.phone_number_id == number.id,
+            )
+            .order_by(DialerBatchItem.id.desc())
+            .first()
+        )
+    if not batch_item:
+        batch_item = (
+            db.query(DialerBatchItem)
+            .filter(
+                DialerBatchItem.company_id == company.id,
+                DialerBatchItem.phone_number_id == number.id,
+            )
+            .order_by(DialerBatchItem.id.desc())
+            .first()
+        )
+    if not batch_item:
+        batch_item = DialerBatchItem(
+            batch_id=report.batch_id or assigned_batch_snapshot or f"unknown-{uuid4().hex[:12]}",
+            company_id=company.id,
+            phone_number_id=number.id,
+            assigned_at=report.attempted_at,
+        )
+        db.add(batch_item)
+
+    batch_item.reported_at = now_utc
+    batch_item.report_batch_id = report.batch_id
+    batch_item.report_call_result_id = call_result.id
+    batch_item.report_attempted_at = report.attempted_at
+    batch_item.report_status = report.status.value
+    batch_item.report_scenario_id = report.scenario_id
+    batch_item.report_outbound_line_id = report.outbound_line_id
+    batch_item.report_reason = report.reason
 
     db.commit()
 

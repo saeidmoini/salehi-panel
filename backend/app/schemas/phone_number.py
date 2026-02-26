@@ -50,6 +50,8 @@ class PhoneNumberHistoryOut(BaseModel):
     assigned_agent: dict | None = None
     scenario_display_name: str | None = None
     outbound_line_display_name: str | None = None
+    sent_batch_id: str | None = None
+    reported_batch_id: str | None = None
 
 
 class PhoneNumberImportResponse(BaseModel):
