@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     default_batch_size: int = Field(100, alias="DEFAULT_BATCH_SIZE")
     timezone: str = Field("Asia/Tehran", alias="TIMEZONE")
     skip_holidays_default: bool = Field(True, alias="SKIP_HOLIDAYS")
-    assignment_timeout_minutes: int = Field(60, alias="ASSIGNMENT_TIMEOUT_MINUTES")
+    assignment_timeout_minutes: int = Field(1440, alias="ASSIGNMENT_TIMEOUT_MINUTES")
     call_cooldown_days: int = Field(3, alias="CALL_COOLDOWN_DAYS")
     # Legacy single-profile bank config (kept as fallback)
     bank_sms_sender: str = Field("30008528", alias="BANK_SMS_SENDER")
