@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useCompany } from '../hooks/useCompany'
+import { useAuth } from '../hooks/useAuth'
 import client from '../api/client'
 
 interface Scenario {
@@ -12,6 +13,7 @@ interface Scenario {
 }
 
 const ScenariosPage = () => {
+  const { user } = useAuth()
   const { company } = useCompany()
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(false)
@@ -139,12 +141,14 @@ const ScenariosPage = () => {
                       >
                         {scenario.is_active ? 'غیرفعال کردن' : 'فعال کردن'}
                       </button>
-                      <button
-                        className="text-xs px-3 py-1 rounded text-blue-700 hover:bg-blue-50"
-                        onClick={() => editCost(scenario)}
-                      >
-                        ویرایش هزینه
-                      </button>
+                      {user?.is_superuser && (
+                        <button
+                          className="text-xs px-3 py-1 rounded text-blue-700 hover:bg-blue-50"
+                          onClick={() => editCost(scenario)}
+                        >
+                          ویرایش هزینه
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

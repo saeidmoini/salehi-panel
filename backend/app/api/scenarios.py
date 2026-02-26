@@ -44,6 +44,8 @@ def create_scenario(
 ):
     """Create a new scenario (admin only)"""
     cfg = schedule_service.ensure_config(db, company_id=company.id)
+    if payload.cost_per_connected is not None and not user.is_superuser:
+        raise HTTPException(status_code=403, detail="Only superuser can set scenario cost")
 
     # Verify company_id matches the path parameter
     if payload.company_id != company.id:
@@ -80,6 +82,8 @@ def update_scenario(
 ):
     """Update scenario (admin only)"""
     schedule_service.ensure_config(db, company_id=company.id)
+    if payload.cost_per_connected is not None and not user.is_superuser:
+        raise HTTPException(status_code=403, detail="Only superuser can set scenario cost")
     scenario = db.query(Scenario).filter(
         Scenario.id == scenario_id,
         Scenario.company_id == company.id
