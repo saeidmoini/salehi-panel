@@ -35,7 +35,12 @@ BILLABLE_STATUSES = {
 # NOT billable: MISSED, BUSY, POWER_OFF, INBOUND_CALL, IN_QUEUE, BANNED
 
 
-def fetch_next_batch(db: Session, company: Company, size: int | None = None):
+def fetch_next_batch(
+    db: Session,
+    company: Company,
+    size: int | None = None,
+    active_lines_count: int | None = None,
+):
     """
     Fetch next batch for a company with:
     1. Global cooldown: no number called by ANY company in last N days
@@ -64,11 +69,16 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
         OutboundLine.company_id == company.id,
         OutboundLine.is_active == True
     ).all()
-    active_lines_count = len(active_outbound_lines)
+    company_active_lines_count = len(active_outbound_lines)
+    if active_lines_count is None:
+        effective_lines_count = company_active_lines_count
+    else:
+        # Prevent over-allocation if dialer sends an invalid high value.
+        effective_lines_count = min(max(active_lines_count, 0), company_active_lines_count)
 
     if size is None:
         # DEFAULT_BATCH_SIZE is treated as "per active outbound line".
-        requested_size = settings.default_batch_size * active_lines_count
+        requested_size = settings.default_batch_size * effective_lines_count
     else:
         requested_size = size
     requested_size = max(0, requested_size)

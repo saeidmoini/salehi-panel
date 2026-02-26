@@ -23,6 +23,7 @@ def _default_outbound_line_display_name(phone_number: str) -> str:
 def next_batch(
     company: str = Query(..., description="Company slug"),
     size: int | None = Query(default=None, ge=1),
+    active_lines_count: int | None = Query(default=None, ge=0, description="Active outbound lines on this dialer server"),
     db: Session = Depends(get_db),
 ):
     """Fetch next batch of numbers for a company"""
@@ -30,7 +31,12 @@ def next_batch(
     if not company_obj:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    payload = dialer_service.fetch_next_batch(db, company=company_obj, size=size)
+    payload = dialer_service.fetch_next_batch(
+        db,
+        company=company_obj,
+        size=size,
+        active_lines_count=active_lines_count,
+    )
     return payload
 
 
