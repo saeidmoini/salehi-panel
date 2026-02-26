@@ -516,6 +516,17 @@ def delete_number(db: Session, number_id: int, current_user: AdminUser, company_
     target_company_id = _resolve_company_id(db, current_user, company_name)
     if target_company_id:
         _ensure_mutable_for_user(db, number_id, target_company_id, current_user)
+    call_result_ids_subq = (
+        db.query(CallResult.id)
+        .filter(CallResult.phone_number_id == number_id)
+        .subquery()
+    )
+    db.query(DialerBatchItem).filter(
+        DialerBatchItem.report_call_result_id.in_(select(call_result_ids_subq.c.id))
+    ).update(
+        {DialerBatchItem.report_call_result_id: None},
+        synchronize_session=False,
+    )
     db.query(CallResult).filter(CallResult.phone_number_id == number_id).delete(synchronize_session=False)
     db.delete(number)
     db.commit()
@@ -533,6 +544,20 @@ def reset_number(db: Session, number_id: int, current_user: AdminUser, company_n
         _ensure_mutable_for_user(db, number_id, target_company_id, current_user)
     # Delete call_results for this company so the dialer picks it up again
     if target_company_id:
+        call_result_ids_subq = (
+            db.query(CallResult.id)
+            .filter(
+                CallResult.phone_number_id == number_id,
+                CallResult.company_id == target_company_id,
+            )
+            .subquery()
+        )
+        db.query(DialerBatchItem).filter(
+            DialerBatchItem.report_call_result_id.in_(select(call_result_ids_subq.c.id))
+        ).update(
+            {DialerBatchItem.report_call_result_id: None},
+            synchronize_session=False,
+        )
         db.query(CallResult).filter(
             CallResult.phone_number_id == number_id,
             CallResult.company_id == target_company_id,
@@ -639,6 +664,17 @@ def bulk_action(db: Session, payload: PhoneNumberBulkAction, current_user: Admin
     target_ids_subq = base_query.with_entities(PhoneNumber.id.label("id")).subquery()
 
     if payload.action == "delete":
+        call_result_ids_subq = (
+            db.query(CallResult.id.label("id"))
+            .join(target_ids_subq, CallResult.phone_number_id == target_ids_subq.c.id)
+            .subquery()
+        )
+        db.query(DialerBatchItem).filter(
+            DialerBatchItem.report_call_result_id.in_(select(call_result_ids_subq.c.id))
+        ).update(
+            {DialerBatchItem.report_call_result_id: None},
+            synchronize_session=False,
+        )
         db.query(CallResult).filter(
             CallResult.phone_number_id.in_(select(target_ids_subq.c.id))
         ).delete(synchronize_session=False)
@@ -651,6 +687,18 @@ def bulk_action(db: Session, payload: PhoneNumberBulkAction, current_user: Admin
     if payload.action == "reset":
         # Delete call_results for this company → dialer will re-call these numbers
         if target_company_id:
+            call_result_ids_subq = (
+                db.query(CallResult.id.label("id"))
+                .join(target_ids_subq, CallResult.phone_number_id == target_ids_subq.c.id)
+                .filter(CallResult.company_id == target_company_id)
+                .subquery()
+            )
+            db.query(DialerBatchItem).filter(
+                DialerBatchItem.report_call_result_id.in_(select(call_result_ids_subq.c.id))
+            ).update(
+                {DialerBatchItem.report_call_result_id: None},
+                synchronize_session=False,
+            )
             db.query(CallResult).filter(
                 CallResult.phone_number_id.in_(select(target_ids_subq.c.id)),
                 CallResult.company_id == target_company_id,
