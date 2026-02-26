@@ -32,6 +32,7 @@ class PhoneNumberOut(BaseModel):
     assigned_agent: dict | None = None  # From most recent call_result
     scenario_display_name: str | None = None  # From most recent call_result
     outbound_line_display_name: str | None = None  # From most recent call_result
+    call_direction: str | None = None  # INBOUND/OUTBOUND from most recent call_result
 
     class Config:
         from_attributes = True
@@ -50,6 +51,7 @@ class PhoneNumberHistoryOut(BaseModel):
     assigned_agent: dict | None = None
     scenario_display_name: str | None = None
     outbound_line_display_name: str | None = None
+    call_direction: str | None = None
     sent_batch_id: str | None = None
     reported_batch_id: str | None = None
 

@@ -145,6 +145,20 @@ def _ensure_call_result_columns():
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS user_message VARCHAR(1000)"))
             if "agent_id" not in columns:
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS agent_id INTEGER"))
+            if "call_direction" not in columns:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN IF NOT EXISTS call_direction VARCHAR(16) NOT NULL DEFAULT 'OUTBOUND'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        f"UPDATE {table_name} "
+                        "SET call_direction = CASE WHEN status = 'INBOUND_CALL' THEN 'INBOUND' ELSE 'OUTBOUND' END "
+                        "WHERE call_direction IS NULL"
+                    )
+                )
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_agent_id ON {table_name} (agent_id)"))
             conn.execute(
                 text(

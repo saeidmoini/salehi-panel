@@ -27,6 +27,7 @@ interface PhoneNumber {
   } | null
   scenario_display_name?: string | null
   outbound_line_display_name?: string | null
+  call_direction?: 'INBOUND' | 'OUTBOUND' | null
 }
 
 interface PhoneNumberHistoryItem {
@@ -48,6 +49,7 @@ interface PhoneNumberHistoryItem {
   } | null
   scenario_display_name?: string | null
   outbound_line_display_name?: string | null
+  call_direction?: 'INBOUND' | 'OUTBOUND' | null
 }
 
 const statusLabels: Record<string, string> = {
@@ -92,6 +94,11 @@ const statusColors: Record<string, string> = {
   UNKNOWN: 'bg-blue-100 text-blue-800',
   INBOUND_CALL: 'bg-sky-100 text-sky-800',
   COMPLAINED: 'bg-pink-100 text-pink-800',
+}
+
+const directionLabels: Record<string, string> = {
+  INBOUND: 'ورودی',
+  OUTBOUND: 'خروجی',
 }
 
 const modifiableStatuses = ['IN_QUEUE', 'MISSED', 'BUSY', 'POWER_OFF', 'BANNED']
@@ -759,6 +766,7 @@ const NumbersPage = () => {
                   </th>
                   <th className="text-right whitespace-nowrap">سناریو</th>
                   <th className="text-right whitespace-nowrap">خط خروجی</th>
+                  <th className="text-right whitespace-nowrap">نوع تماس</th>
                   <th className="text-right cursor-pointer select-none whitespace-nowrap" onClick={() => handleSort('total_attempts')}>
                     تعداد تلاش {sortBy === 'total_attempts' && (sortOrder === 'asc' ? '↑' : '↓')}
                   </th>
@@ -801,6 +809,7 @@ const NumbersPage = () => {
                     </td>
                     <td className="text-right whitespace-nowrap">{n.scenario_display_name || '-'}</td>
                     <td className="text-right whitespace-nowrap">{n.outbound_line_display_name || '-'}</td>
+                    <td className="text-right whitespace-nowrap">{directionLabels[n.call_direction || 'OUTBOUND']}</td>
                     <td className="text-right whitespace-nowrap">
                       {n.total_attempts > 0 ? (
                         <button
@@ -911,11 +920,11 @@ const NumbersPage = () => {
                       <th className="text-right whitespace-nowrap">وضعیت</th>
                       <th className="text-right whitespace-nowrap">سناریو</th>
                       <th className="text-right whitespace-nowrap">خط خروجی</th>
+                      <th className="text-right whitespace-nowrap">نوع تماس</th>
                       <th className="text-right whitespace-nowrap">تعداد تلاش</th>
                       <th className="text-right w-32 whitespace-nowrap">آخرین تلاش</th>
                       <th className="text-right w-36 whitespace-nowrap">کارشناس</th>
                       <th className="text-right min-w-[220px] max-w-[520px]">پیام تماس</th>
-                      <th className="text-right w-52 whitespace-nowrap">اقدامات</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -939,6 +948,7 @@ const NumbersPage = () => {
                         </td>
                         <td className="text-right whitespace-nowrap">{h.scenario_display_name || '-'}</td>
                         <td className="text-right whitespace-nowrap">{h.outbound_line_display_name || '-'}</td>
+                        <td className="text-right whitespace-nowrap">{directionLabels[h.call_direction || 'OUTBOUND']}</td>
                         <td className="text-right whitespace-nowrap">{h.total_attempts}</td>
                         <td className="text-right whitespace-nowrap">
                           {h.last_attempt_at ? dayjs(h.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
@@ -962,9 +972,6 @@ const NumbersPage = () => {
                           <div className="text-xs text-slate-700 whitespace-pre-line break-words max-w-[520px]">
                             {h.last_user_message || '—'}
                           </div>
-                        </td>
-                        <td className="text-right w-52 whitespace-nowrap">
-                          <span className="text-xs text-slate-400">—</span>
                         </td>
                       </tr>
                     ))}

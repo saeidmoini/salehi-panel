@@ -381,6 +381,7 @@ def list_number_history(
                 "assigned_agent": agent_payload,
                 "scenario_display_name": call.scenario.display_name if call.scenario else None,
                 "outbound_line_display_name": call.outbound_line.display_name if call.outbound_line else None,
+                "call_direction": call.call_direction,
                 "sent_batch_id": trace.batch_id if trace else None,
                 "reported_batch_id": trace.report_batch_id if trace else None,
             }
@@ -423,6 +424,7 @@ def _enrich_with_call_data(db: Session, number_list: list, target_company_id: in
             number.total_attempts = call_counts.get(number.id, 0)
             number.scenario_display_name = latest_call.scenario.display_name if latest_call.scenario else None
             number.outbound_line_display_name = latest_call.outbound_line.display_name if latest_call.outbound_line else None
+            number.call_direction = latest_call.call_direction
 
 
 def count_numbers(

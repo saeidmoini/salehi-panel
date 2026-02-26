@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from ..core.config import get_settings
 from ..models.phone_number import PhoneNumber, CallStatus, GlobalStatus
 from ..models.dialer_batch import DialerBatch
-from ..models.call_result import CallResult
+from ..models.call_result import CallResult, CallDirection
 from ..models.dialer_batch_item import DialerBatchItem
 from ..models.user import AdminUser, UserRole, AgentType
 from ..models.company import Company
@@ -274,11 +274,13 @@ def report_result(db: Session, report: DialerReport, company: Company):
     _sync_global_status_from_call_status(number, report.status)
 
     # Create call result
+    call_direction = CallDirection.INBOUND if report.number_id is None else CallDirection.OUTBOUND
     call_result = CallResult(
         phone_number_id=number.id,
         company_id=company.id,
         scenario_id=report.scenario_id,
         outbound_line_id=report.outbound_line_id,
+        call_direction=call_direction,
         status=report.status.value,
         reason=report.reason,
         attempted_at=report.attempted_at,
