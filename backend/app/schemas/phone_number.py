@@ -35,6 +35,19 @@ class PhoneNumberOut(BaseModel):
         from_attributes = True
 
 
+class PhoneNumberHistoryOut(BaseModel):
+    call_result_id: int
+    number_id: int
+    phone_number: str
+    global_status: GlobalStatus
+    status: str
+    total_attempts: int
+    last_attempt_at: datetime
+    last_user_message: str | None = None
+    assigned_agent_id: int | None = None
+    assigned_agent: dict | None = None
+
+
 class PhoneNumberImportResponse(BaseModel):
     inserted: int
     duplicates: int

@@ -27,6 +27,25 @@ interface PhoneNumber {
   } | null
 }
 
+interface PhoneNumberHistoryItem {
+  call_result_id: number
+  number_id: number
+  phone_number: string
+  global_status: 'ACTIVE' | 'COMPLAINED' | 'POWER_OFF'
+  status: string
+  total_attempts: number
+  last_attempt_at: string
+  last_user_message?: string | null
+  assigned_agent_id?: number | null
+  assigned_agent?: {
+    id: number
+    username: string
+    first_name?: string | null
+    last_name?: string | null
+    phone_number?: string | null
+  } | null
+}
+
 const statusLabels: Record<string, string> = {
   IN_QUEUE: 'در صف تماس',
   MISSED: 'از دست رفته',
@@ -115,6 +134,10 @@ const NumbersPage = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [exporting, setExporting] = useState(false)
   const [selectingAll, setSelectingAll] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyPhone, setHistoryPhone] = useState<string>('')
+  const [historyRows, setHistoryRows] = useState<PhoneNumberHistoryItem[]>([])
 
   // null/undefined status means number has never been called → treat as IN_QUEUE (modifiable)
   const canModifyStatus = (status: string | null | undefined) =>
@@ -504,6 +527,24 @@ const NumbersPage = () => {
     }
   }
 
+  const openHistory = async (n: PhoneNumber) => {
+    if (!n.total_attempts) return
+    setHistoryOpen(true)
+    setHistoryLoading(true)
+    setHistoryPhone(n.phone_number)
+    setHistoryRows([])
+    try {
+      const { data } = await client.get<PhoneNumberHistoryItem[]>(`/api/numbers/${n.id}/history`, {
+        params: { company: company?.name || undefined },
+      })
+      setHistoryRows(data)
+    } catch (err) {
+      console.error('Failed to fetch number history', err)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-6 px-2 md:px-0 max-w-full w-full min-w-0">
       {isAdmin && (
@@ -750,7 +791,19 @@ const NumbersPage = () => {
                         {statusLabels[n.status || 'IN_QUEUE'] || n.status}
                       </span>
                     </td>
-                    <td className="text-right whitespace-nowrap">{n.total_attempts}</td>
+                    <td className="text-right whitespace-nowrap">
+                      {n.total_attempts > 0 ? (
+                        <button
+                          type="button"
+                          className="text-blue-700 hover:underline"
+                          onClick={() => openHistory(n)}
+                        >
+                          {n.total_attempts}
+                        </button>
+                      ) : (
+                        0
+                      )}
+                    </td>
                     <td className="text-right whitespace-nowrap">
                       {n.last_attempt_at ? dayjs(n.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
                     </td>
@@ -817,6 +870,97 @@ const NumbersPage = () => {
           </div>
         )}
       </div>
+      {historyOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-7xl max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h3 className="font-semibold text-slate-900">تاریخچه تماس شماره</h3>
+                <p className="text-xs text-slate-500 font-mono">{historyPhone}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-3 py-1 text-sm"
+                onClick={() => setHistoryOpen(false)}
+              >
+                بستن
+              </button>
+            </div>
+            <div className="p-4 overflow-auto max-h-[calc(90vh-72px)]">
+              {historyLoading ? (
+                <div className="text-sm text-slate-600">در حال بارگذاری...</div>
+              ) : historyRows.length === 0 ? (
+                <div className="text-sm text-slate-500">رکوردی یافت نشد.</div>
+              ) : (
+                <table className="min-w-full table-auto text-sm text-right">
+                  <thead>
+                    <tr className="text-slate-500">
+                      <th className="py-2 text-right w-10 whitespace-nowrap">#</th>
+                      <th className="py-2 text-right whitespace-nowrap">شماره</th>
+                      <th className="text-right whitespace-nowrap">وضعیت گلوبال</th>
+                      <th className="text-right whitespace-nowrap">وضعیت</th>
+                      <th className="text-right whitespace-nowrap">تعداد تلاش</th>
+                      <th className="text-right w-32 whitespace-nowrap">آخرین تلاش</th>
+                      <th className="text-right w-36 whitespace-nowrap">کارشناس</th>
+                      <th className="text-right min-w-[220px] max-w-[520px]">پیام تماس</th>
+                      <th className="text-right w-52 whitespace-nowrap">اقدامات</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyRows.map((h) => (
+                      <tr key={h.call_result_id} className="border-t">
+                        <td className="py-2 text-right text-xs text-slate-400">{h.call_result_id}</td>
+                        <td className="py-2 font-mono text-xs whitespace-nowrap">{h.phone_number}</td>
+                        <td className="text-right whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${globalStatusColors[h.global_status] || 'bg-slate-100 text-slate-700'}`}
+                          >
+                            {globalStatusLabels[h.global_status] || h.global_status}
+                          </span>
+                        </td>
+                        <td className="text-right whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${statusColors[h.status || 'IN_QUEUE'] || 'bg-slate-100 text-slate-700'}`}
+                          >
+                            {statusLabels[h.status || 'IN_QUEUE'] || h.status}
+                          </span>
+                        </td>
+                        <td className="text-right whitespace-nowrap">{h.total_attempts}</td>
+                        <td className="text-right whitespace-nowrap">
+                          {h.last_attempt_at ? dayjs(h.last_attempt_at).calendar('jalali').format('YYYY/MM/DD HH:mm') : '-'}
+                        </td>
+                        <td className="text-right whitespace-nowrap">
+                          {h.assigned_agent ? (
+                            <div className="space-y-0.5">
+                              <div className="text-sm">
+                                {`${(h.assigned_agent.first_name || '')} ${(h.assigned_agent.last_name || '')}`.trim() ||
+                                  h.assigned_agent.username}
+                              </div>
+                              {h.assigned_agent.phone_number && (
+                                <div className="text-xs text-slate-500 font-mono">{h.assigned_agent.phone_number}</div>
+                              )}
+                            </div>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+                        <td className="text-right align-top">
+                          <div className="text-xs text-slate-700 whitespace-pre-line break-words max-w-[520px]">
+                            {h.last_user_message || '—'}
+                          </div>
+                        </td>
+                        <td className="text-right w-52 whitespace-nowrap">
+                          <span className="text-xs text-slate-400">—</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

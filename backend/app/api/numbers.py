@@ -11,6 +11,7 @@ from ..models.phone_number import CallStatus, GlobalStatus
 from ..schemas.phone_number import (
     PhoneNumberCreate,
     PhoneNumberOut,
+    PhoneNumberHistoryOut,
     PhoneNumberStatusUpdate,
     PhoneNumberImportResponse,
     PhoneNumberStatsResponse,
@@ -149,6 +150,21 @@ def reset_number(
 ):
     number = phone_service.reset_number(db, number_id, current_user=current_user, company_name=company)
     return number
+
+
+@router.get("/{number_id}/history", response_model=list[PhoneNumberHistoryOut])
+def number_history(
+    number_id: int,
+    company: str | None = Query(default=None, description="Company slug"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    return phone_service.list_number_history(
+        db,
+        current_user=current_user,
+        number_id=number_id,
+        company_name=company,
+    )
 
 
 @router.post("/bulk", response_model=PhoneNumberBulkResult)

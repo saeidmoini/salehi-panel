@@ -305,6 +305,56 @@ def list_numbers(
     return number_list
 
 
+def list_number_history(
+    db: Session,
+    current_user: AdminUser,
+    number_id: int,
+    company_name: str | None = None,
+):
+    target_company_id = _resolve_company_id(db, current_user, company_name)
+
+    number = db.get(PhoneNumber, number_id)
+    if not number:
+        raise HTTPException(status_code=404, detail="Number not found")
+
+    query = (
+        db.query(CallResult)
+        .options(joinedload(CallResult.agent))
+        .filter(CallResult.phone_number_id == number_id)
+    )
+    if target_company_id:
+        query = query.filter(CallResult.company_id == target_company_id)
+
+    calls = query.order_by(CallResult.id.desc()).all()
+    total = len(calls)
+    history: list[dict] = []
+    for idx, call in enumerate(calls):
+        agent_payload = None
+        if call.agent:
+            agent_payload = {
+                "id": call.agent.id,
+                "username": call.agent.username,
+                "first_name": call.agent.first_name,
+                "last_name": call.agent.last_name,
+                "phone_number": call.agent.phone_number,
+            }
+        history.append(
+            {
+                "call_result_id": call.id,
+                "number_id": number.id,
+                "phone_number": number.phone_number,
+                "global_status": number.global_status,
+                "status": call.status,
+                "total_attempts": total - idx,
+                "last_attempt_at": call.attempted_at,
+                "last_user_message": call.user_message,
+                "assigned_agent_id": call.agent_id,
+                "assigned_agent": agent_payload,
+            }
+        )
+    return history
+
+
 def _enrich_with_call_data(db: Session, number_list: list, target_company_id: int):
     """Populate virtual fields on PhoneNumber objects from call_results.
     Orders by id DESC so that when timestamps tie, the most recently inserted row wins.
