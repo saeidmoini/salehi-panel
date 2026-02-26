@@ -72,7 +72,10 @@ def fetch_next_batch(db: Session, company: Company, size: int | None = None):
         requested_size = size
     requested_size = max(0, requested_size)
 
-    unlock_stale_assignments(db)
+    # IMPORTANT: do not auto-release stale assignments here.
+    # With multiple dialer servers and local prefetch queues, releasing reserved numbers
+    # can make the same number appear in another batch and get dialed twice.
+    # A number is released on report_result/reset flows.
 
     # Calculate cooldown cutoff
     cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.call_cooldown_days)
@@ -281,21 +284,9 @@ def report_result(db: Session, report: DialerReport, company: Company):
 
 def unlock_stale_assignments(db: Session) -> int:
     """Unlock numbers that have been assigned for too long"""
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.assignment_timeout_minutes)
-    stale = (
-        db.query(PhoneNumber)
-        .filter(
-            PhoneNumber.assigned_at.is_not(None),
-            PhoneNumber.assigned_at <= cutoff,
-        )
-        .all()
-    )
-    for num in stale:
-        num.assigned_at = None
-        num.assigned_batch_id = None
-    if stale:
-        db.commit()
-    return len(stale)
+    # Disabled intentionally to guarantee "no duplicate send" behavior across parallel dialers.
+    # Numbers are cleared from assignment only when a report is received or admin resets them.
+    return 0
 
 
 def _resolve_agent(db: Session, report: DialerReport, company: Company) -> AdminUser | None:
