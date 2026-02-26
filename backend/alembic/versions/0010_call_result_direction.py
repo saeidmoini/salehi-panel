@@ -17,9 +17,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "call_results",
-        sa.Column("call_direction", sa.String(length=16), nullable=False, server_default="OUTBOUND"),
+    op.execute(
+        """
+        ALTER TABLE call_results
+        ADD COLUMN IF NOT EXISTS call_direction VARCHAR(16) DEFAULT 'OUTBOUND' NOT NULL
+        """
     )
     op.execute(
         """
